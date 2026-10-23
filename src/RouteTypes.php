@@ -18,6 +18,8 @@ final readonly class RouteTypes
     /**
      * @param list<string> $parameters
      * @param class-string|null $dataClass the loader's return type, if it has one
+     * @param list<string> $segments the path, `racks` or `{rack}` each, which
+     *                               the generated route() builds URLs from
      */
     public function __construct(
         public RouteKind $kind,
@@ -26,6 +28,7 @@ final readonly class RouteTypes
         public string $layoutKey,
         public array $parameters,
         public ?string $dataClass,
+        public array $segments = [],
     ) {}
 
     public static function of(CompiledRoute $route): self
@@ -37,6 +40,7 @@ final readonly class RouteTypes
             layoutKey: $route->layoutKey,
             parameters: $route->parameters,
             dataClass: self::returnTypeOf($route->class),
+            segments: $route->segments,
         );
     }
 

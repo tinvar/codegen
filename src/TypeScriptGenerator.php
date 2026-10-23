@@ -17,9 +17,19 @@ use Tinvar\Support\Str;
  *
  * Fields come from DataShape, the same source the encoder walks, so the
  * generated interface always describes the payload that is actually produced.
+ *
+ * A build writes two files side by side; see files(). They were one, and
+ * one file cannot be both: the interfaces are imported by path, so it has
+ * top-level exports -- and in a file with top-level exports `declare module
+ * '@queries/racks'` is an augmentation of a module that does not exist, not
+ * a declaration of one (TS2664), so every import of a query failed to
+ * resolve (TS2307).
  */
 final class TypeScriptGenerator
 {
+    /** Where the generated route() gets its runtime. */
+    public const ROUTE_RUNTIME = '@tinvar/react/route';
+
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
 
@@ -41,12 +51,20 @@ final class TypeScriptGenerator
     /** @var array<string, string> class => emitted interface body */
     private array $interfaces = [];
 
-    public function __construct(private readonly string $header = '')
-    {
+    /**
+     * @param string $module how the ambient file imports the module file: the
+     *                       module's path relative to it, without extension
+     */
+    public function __construct(
+        private readonly string $header = '',
+        private readonly string $module = './generated',
+    ) {
         $this->types = new TypeMapper();
     }
 
     /**
+     * The module file alone; see files() for what a build writes.
+     *
      * @param list<class-string<Data>> $dataClasses
      * @param list<class-string>       $queryClasses
      * @param list<RouteTypes>         $routes
@@ -58,6 +76,34 @@ final class TypeScriptGenerator
         array $routes = [],
         array $actions = [],
     ): string {
+        return $this->files($dataClasses, $queryClasses, $routes, $actions)['module'];
+    }
+
+    /**
+     * The two files a build writes, side by side.
+     *
+     *   module   A TypeScript module (`generated.ts`): the Data interfaces,
+     *            PageProps and LayoutProps, ActionResult, and route() -- a
+     *            real function, built on ROUTE_RUNTIME, so importing it
+     *            resolves at build time as well as type-checking.
+     *   ambient  A declaration file (`modules.d.ts`) with no top-level import
+     *            or export, holding `declare module '@queries/...'` and
+     *            `'@actions/...'`. Being a script is what makes each one a
+     *            declaration. Each module takes the types it names from the
+     *            module file, by the path given to the constructor.
+     *
+     * @param list<class-string<Data>> $dataClasses
+     * @param list<class-string>       $queryClasses
+     * @param list<RouteTypes>         $routes
+     * @param list<CompiledAction>     $actions
+     * @return array{module: string, ambient: string}
+     */
+    public function files(
+        array $dataClasses,
+        array $queryClasses = [],
+        array $routes = [],
+        array $actions = [],
+    ): array {
         $this->interfaces = [];
         $this->types = new TypeMapper();
 
@@ -72,7 +118,10 @@ final class TypeScriptGenerator
             }
         }
 
+        // Described before the set of Data classes closes: a query's result
+        // and an action's form-request fields can name Data classes too.
         $queries = array_map($this->describeQuery(...), $queryClasses);
+        $described = array_map($this->describeAction(...), $actions);
 
         // Emitting a Data class can pull in others it references; keep going
         // until the set closes.
@@ -82,7 +131,18 @@ final class TypeScriptGenerator
             }
         }
 
-        return $this->render($queries, $routes, $actions);
+        // Both would be `export interface ActionResult` in one module, which
+        // TypeScript merges into a type describing neither.
+        if ($actions !== [] && \in_array('ActionResult', $this->types->registered(), true)) {
+            throw new CodegenException(
+                'A Data class named ActionResult would be emitted beside the action result type of the same name. Rename it.',
+            );
+        }
+
+        return [
+            'module' => $this->renderModule($routes, $actions !== []),
+            'ambient' => $this->renderAmbient($queries, $described),
+        ];
     }
 
     /** @param class-string $class */
@@ -215,53 +275,160 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}> $queries
-     * @param list<RouteTypes>     $routes
-     * @param list<CompiledAction> $actions
+     * @return array{module: string, function: string}
      */
-    private function render(array $queries, array $routes = [], array $actions = []): string
+    private function describeAction(CompiledAction $action): array
+    {
+        $where = "The action `{$action->name}`";
+        $arguments = [];
+        foreach ($action->models as $parameter => $_) {
+            $arguments[] = self::key($parameter, $where) . ': string';   // a model crosses as its id
+        }
+        foreach ($action->formRequests as $class) {
+            foreach (DataShape::fieldsOf($class) as $field) {
+                $type = $field->getType();
+                $arguments[] = \sprintf(
+                    '%s: %s',
+                    self::key($field->getName(), "{$class}::\${$field->getName()}"),
+                    $type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
+                );
+            }
+        }
+
+        $module = self::module('@actions/' . Str::shortName($action->class), "The actions of {$action->class}");
+
+        return [
+            'module' => $module,
+            'function' => \sprintf(
+                "  /** Posts to the PHP action `%s`. */\n  export function %s(args: { %s }): Promise<ActionResult>;\n",
+                self::comment($action->name),
+                self::identifier($action->method, "{$action->class}::{$action->method}()"),
+                implode('; ', $arguments),
+            ),
+        ];
+    }
+
+    private function preamble(string $about): string
     {
         $out = $this->header === '' ? '' : $this->header . "\n";
-        $out .= "// Generated by tinvar codegen. Do not edit.\n";
-        $out .= "// Source of truth: the PHP Data classes and #[Query] attributes.\n\n";
 
-        foreach ($this->interfaces as $body) {
-            $out .= $body . "\n";
+        return $out . "// Generated by tinvar codegen. Do not edit.\n// {$about}\n";
+    }
+
+    /** @param list<RouteTypes> $routes */
+    private function renderModule(array $routes, bool $hasActions): string
+    {
+        $out = $this->preamble('Source of truth: the PHP Data classes, #[Page] and #[Layout] routes, and #[Action] methods.');
+
+        $hasLayouts = array_filter($routes, static fn (RouteTypes $r): bool => $r->kind === RouteKind::Layout) !== [];
+        $hasNamed = array_filter(
+            $routes,
+            static fn (RouteTypes $r): bool => $r->kind === RouteKind::Page && $r->name !== null,
+        ) !== [];
+
+        // React's own types by import: a module cannot reach the UMD global
+        // `React` that a declaration file could.
+        $imports = '';
+        if ($hasLayouts) {
+            $imports .= "import type { ReactNode } from 'react';\n";
         }
+        if ($hasNamed) {
+            $imports .= \sprintf("import { routes } from %s;\n", self::literal(self::ROUTE_RUNTIME, 'The route runtime'));
+        }
+        $out .= $imports === '' ? "\n" : "\n{$imports}\n";
+
+        $sections = array_values($this->interfaces);
+        $sections[] = $this->renderRoutes($routes);
+
+        if ($hasActions) {
+            $sections[] = "export interface ActionResult {\n"
+                . "  revalidatedRoutes: string[];\n  revalidatedTags: string[];\n"
+                . "  flash: Record<string, unknown>;\n  redirect: string | null;\n}\n";
+        }
+
+        return $out . implode("\n", array_map(
+            static fn (string $section): string => rtrim($section, "\n") . "\n",
+            array_filter($sections, static fn (string $section): bool => $section !== ''),
+        ));
+    }
+
+    /**
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}> $queries
+     * @param list<array{module: string, function: string}> $actions
+     */
+    private function renderAmbient(array $queries, array $actions): string
+    {
+        $out = $this->preamble(
+            "The @queries/* and @actions/* modules. Nothing here is imported or exported at the top level, so\n"
+            . "// each `declare module` declares its module rather than augmenting one that does not exist.",
+        );
 
         // One module per wire-name prefix: `racks.unitLoad` is unitLoad in
         // '@queries/racks'. Every query went into '@queries/racks' -- the
         // example app's name, written into the framework -- so any other
         // application's queries were typed under a module it does not have.
+        /** @var array<string, list<string>> $modules module => its members, rendered */
         $modules = [];
         foreach ($queries as $query) {
-            $modules[$query['module']][] = $query;
+            $where = "The query `{$query['name']}`";
+            $args = implode(
+                '; ',
+                array_map(static fn (array $a): string => self::key($a['name'], $where) . ": {$a['type']}", $query['args']),
+            );
+            $modules[$query['module']][] = \sprintf(
+                "  /** Calls the PHP query `%s` over the request's socket. */\n  export function %s(args: { %s }): Promise<%s>;\n",
+                self::comment($query['name']),
+                $query['function'],
+                $args,
+                $query['returns'],
+            );
         }
         ksort($modules);
 
-        foreach ($modules as $module => $members) {
-            $out .= sprintf("declare module %s {\n", self::literal((string) $module, "The module {$module}"));
-            foreach ($members as $query) {
-                $where = "The query `{$query['name']}`";
-                $args = implode(
-                    '; ',
-                    array_map(static fn (array $a): string => self::key($a['name'], $where) . ": {$a['type']}", $query['args']),
-                );
-                $out .= sprintf(
-                    "  /** Calls the PHP query `%s` over the request's socket. */\n  export function %s(args: { %s }): Promise<%s>;\n",
-                    self::comment($query['name']),
-                    $query['function'],
-                    $args,
-                    $query['returns'],
-                );
-            }
+        $byClass = [];
+        foreach ($actions as $action) {
+            $byClass[$action['module']][] = $action['function'];
+        }
+
+        foreach ([...$modules, ...$byClass] as $module => $members) {
+            $aliases = $this->aliasesFor(implode('', $members), str_starts_with((string) $module, '@actions'));
+
+            $out .= \sprintf("\ndeclare module %s {\n", self::literal((string) $module, "The module {$module}"));
+            $out .= $aliases === '' ? '' : $aliases . "\n";
+            $out .= implode('', $members);
+            // Everything in an ambient module is exported unless the module
+            // says what it exports; without this the aliases would be too.
+            $out .= $aliases === '' ? '' : "  export {};\n";
             $out .= "}\n";
         }
 
-        $out .= $this->renderRoutes($routes);
-        $out .= $this->renderActions($actions);
-
         return $out;
+    }
+
+    /**
+     * Aliases for the interfaces a declared module's members name, from the
+     * module file -- the one place they are declared. Import types, because
+     * an ambient module may not import by a relative path (TS2439), and
+     * aliases so the signatures read as the module file's do.
+     */
+    private function aliasesFor(string $members, bool $action): string
+    {
+        $names = $action ? ['ActionResult'] : [];
+        foreach ($this->types->registered() as $name) {
+            if (preg_match('/\b' . preg_quote($name, '/') . '\b/', $members) === 1) {
+                $names[] = $name;
+            }
+        }
+
+        $names = array_unique($names);
+        sort($names);
+
+        $module = self::literal($this->module, 'The path of the module file');
+
+        return implode('', array_map(
+            static fn (string $name): string => "  type {$name} = import({$module}).{$name};\n",
+            $names,
+        ));
     }
 
     /**
@@ -282,7 +449,7 @@ final class TypeScriptGenerator
         $pages = array_values(array_filter($routes, static fn (RouteTypes $r): bool => $r->kind === RouteKind::Page));
         $layouts = array_values(array_filter($routes, static fn (RouteTypes $r): bool => $r->kind === RouteKind::Layout));
 
-        $out = "\n";
+        $out = '';
 
         if ($pages !== []) {
             $out .= "export interface PageDataMap {\n";
@@ -309,7 +476,7 @@ final class TypeScriptGenerator
             }
             $out .= "}\n\n";
             $out .= "export type LayoutProps<K extends keyof LayoutDataMap> = {\n"
-                . "  data: LayoutDataMap[K];\n  children: React.ReactNode;\n};\n\n";
+                . "  data: LayoutDataMap[K];\n  children: ReactNode;\n};\n\n";
         }
 
         $named = array_values(array_filter($pages, static fn (RouteTypes $r): bool => $r->name !== null));
@@ -323,61 +490,44 @@ final class TypeScriptGenerator
                 );
             }
             $out .= "}\n\n";
+
+            // A function, not a declaration of one. Declared only, it
+            // type-checked and then failed the build: nothing defined it.
             $out .= "/** Builds a URL for a named route. A missing parameter is a type error. */\n"
-                . "export declare function route<N extends keyof RouteMap>(name: N, params: RouteMap[N]): string;\n";
+                . "export const route = routes<RouteMap>({\n";
+            foreach ($named as $route) {
+                $out .= sprintf(
+                    "  %s: [%s],\n",
+                    self::literal((string) $route->name, "The route {$route->name}"),
+                    implode(', ', array_map(
+                        static fn (string $segment): string => self::literal($segment, "A segment of the route {$route->name}"),
+                        self::segmentsOf($route),
+                    )),
+                );
+            }
+            $out .= "});\n";
         }
 
         return $out;
     }
 
-    /** @param list<CompiledAction> $actions */
-    private function renderActions(array $actions): string
+    /**
+     * A named route's path segments, which must place every one of its
+     * parameters: a table that left one out would build URLs without it.
+     *
+     * @return list<string>
+     */
+    private static function segmentsOf(RouteTypes $route): array
     {
-        if ($actions === []) {
-            return '';
-        }
-
-        /** @var array<string, list<CompiledAction>> $byClass */
-        $byClass = [];
-        foreach ($actions as $action) {
-            $byClass[Str::shortName($action->class)][] = $action;
-        }
-
-        $out = "\nexport interface ActionResult {\n"
-            . "  revalidatedRoutes: string[];\n  revalidatedTags: string[];\n"
-            . "  flash: Record<string, unknown>;\n  redirect: string | null;\n}\n";
-
-        foreach ($byClass as $short => $group) {
-            $module = self::module("@actions/{$short}", "The actions of {$group[0]->class}");
-            $out .= sprintf("\ndeclare module %s {\n", self::literal($module, "The module {$module}"));
-            foreach ($group as $action) {
-                $where = "The action `{$action->name}`";
-                $arguments = [];
-                foreach ($action->models as $parameter => $_) {
-                    $arguments[] = self::key($parameter, $where) . ': string';   // a model crosses as its id
-                }
-                foreach ($action->formRequests as $class) {
-                    foreach (DataShape::fieldsOf($class) as $field) {
-                        $type = $field->getType();
-                        $arguments[] = sprintf(
-                            '%s: %s',
-                            self::key($field->getName(), "{$class}::\${$field->getName()}"),
-                            $type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
-                        );
-                    }
-                }
-
-                $out .= sprintf(
-                    "  /** Posts to the PHP action `%s`. */\n  export function %s(args: { %s }): Promise<ActionResult>;\n",
-                    self::comment($action->name),
-                    self::identifier($action->method, "{$action->class}::{$action->method}()"),
-                    implode('; ', $arguments),
+        foreach ($route->parameters as $parameter) {
+            if (!\in_array('{' . $parameter . '}', $route->segments, true)) {
+                throw new CodegenException(
+                    "The route {$route->name} has a parameter `{$parameter}` its path segments do not place.",
                 );
             }
-            $out .= "}\n";
         }
 
-        return $out;
+        return $route->segments;
     }
 
     /** @param list<string> $parameters */

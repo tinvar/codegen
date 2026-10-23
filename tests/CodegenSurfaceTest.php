@@ -19,9 +19,10 @@ use Tinvar\Tests\Codegen\Fixtures as F;
 require_once __DIR__ . '/Fixtures/surface.php';
 require_once __DIR__ . '/../../framework/tests/Orm/Fixtures/models.php';
 
+/** The module file, then the ambient one. */
 function emit(array $data = [], array $queries = [], array $routes = [], array $actions = [], string $header = ''): string
 {
-    return (new TypeScriptGenerator($header))->generate($data, $queries, $routes, $actions);
+    return implode("\n", (new TypeScriptGenerator($header))->files($data, $queries, $routes, $actions));
 }
 
 describe('data shapes', function () {
@@ -137,7 +138,10 @@ describe('routes', function () {
             ->toContain('export type LayoutProps<K extends keyof LayoutDataMap>')
             ->toContain("'sites.rack': { site: string; rack: string };")
             ->toContain("'sites.raw': Record<string, never>;")
-            ->toContain('export declare function route<N extends keyof RouteMap>');
+            ->toContain("import { routes } from '@tinvar/react/route';")
+            ->toContain('export const route = routes<RouteMap>({')
+            ->toContain("  'sites.rack': ['sites', '{site}', 'racks', '{rack}'],\n")
+            ->toContain("  'sites.raw': ['sites', 'raw'],\n");
     });
 
     it('emits no route maps without routes', function () {

@@ -66,9 +66,10 @@ final class QueryNameWithALineTerminator
     }
 }
 
+/** Both files, one after the other: what is asserted here is what text reaches either. */
 function emit(array $queries = [], array $routes = [], array $actions = []): string
 {
-    return (new TypeScriptGenerator())->generate([], $queries, $routes, $actions);
+    return implode("\n", (new TypeScriptGenerator())->files([], $queries, $routes, $actions));
 }
 
 function page(string $view, ?string $name = null): RouteTypes
