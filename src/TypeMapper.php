@@ -120,7 +120,14 @@ final class TypeMapper
         return $this->mapElement($element['value'], $where) . '[]';
     }
 
-    /** `Lazy<T>` becomes `Promise<T>`, as the spec's codegen table says. */
+    /**
+     * `Lazy<T>` becomes `T`: the encoder resolves a Lazy and sends its value.
+     *
+     * The spec's codegen table says `Promise<T>`, which is what streaming an
+     * unresolved Lazy (Level 3 lazy loading) will send. Nothing sends that
+     * yet, and a type promising it had components awaiting a plain list.
+     * The type follows what is produced, and changes when that does.
+     */
     private function mapLazy(?string $docHint, string $where): string
     {
         $element = DocBlock::lazyType($docHint);
@@ -130,7 +137,7 @@ final class TypeMapper
             );
         }
 
-        return 'Promise<' . $this->mapElement($element, $where) . '>';
+        return $this->mapElement($element, $where);
     }
 
     /** Maps a docblock type string, for places where no ReflectionType exists. */

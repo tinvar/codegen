@@ -80,9 +80,14 @@ it('maps a nullable field to a union with null', function () {
         ->toContain('primary: GenUnit | null;');
 });
 
-it('maps Lazy<T> to Promise<T>', function () {
+// The encoder resolves a Lazy and sends its value (Encoder::walk); typed as
+// a Promise, a component awaited a list, or passed it to use(), and got the
+// list itself.
+it('maps Lazy<T> to T, the value the encoder sends', function () {
     expect((new TypeScriptGenerator())->generate([GenLazy::class]))
-        ->toContain('units: Promise<GenUnit[]>;');
+        ->toContain('units: GenUnit[];')
+        ->and((new Encoder())->encode(new GenLazy(Lazy::of(fn () => [new GenUnit('u1', 1, 1.5, true)]))))
+        ->toBe(['units' => [['id' => 'u1', 'position' => 1, 'watts' => 1.5, 'online' => true]]]);
 });
 
 it('follows references, so one root pulls in the classes it needs', function () {
