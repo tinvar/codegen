@@ -26,7 +26,22 @@ final class TypeMapper
 
     public function register(string $class): string
     {
-        return $this->names[$class] ??= Str::shortName($class);
+        if (isset($this->names[$class])) {
+            return $this->names[$class];
+        }
+
+        // Interfaces are emitted under short names, so two Data classes that
+        // share one became two `export interface X` blocks with different
+        // bodies -- a TypeScript merge of both, describing neither.
+        $short = Str::shortName($class);
+        $clash = array_search($short, $this->names, true);
+        if ($clash !== false) {
+            throw new CodegenException(
+                "{$class} and {$clash} would both be emitted as `{$short}`. Rename one of them.",
+            );
+        }
+
+        return $this->names[$class] = $short;
     }
 
     public function isRegistered(string $class): bool
@@ -73,7 +88,8 @@ final class TypeMapper
 
         $mapped = $this->mapNamed($type->getName(), $docHint, $where);
 
-        return $type->allowsNull() && $mapped !== 'null' ? "{$mapped} | null" : $mapped;
+        // `unknown` already includes null; PHP reports mixed as nullable.
+        return $type->allowsNull() && $mapped !== 'null' && $mapped !== 'unknown' ? "{$mapped} | null" : $mapped;
     }
 
     private function mapNamed(string $name, ?string $docHint, string $where): string
