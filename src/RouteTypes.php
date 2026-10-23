@@ -40,7 +40,10 @@ final readonly class RouteTypes
         );
     }
 
-    /** @param class-string $class @return class-string|null */
+    /**
+     * @param class-string $class
+     * @return class-string|null
+     */
     private static function returnTypeOf(string $class): ?string
     {
         $reflection = new \ReflectionClass($class);
