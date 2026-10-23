@@ -90,7 +90,7 @@ function generated(): array
 
     return (new TypeScriptGenerator())->files(
         [F\CgPage::class],
-        [F\FindSite::class, F\SearchSites::class, F\Ping::class],
+        [F\FindSite::class, F\SearchSites::class, F\Ping::class, F\SiteStats::class],
         array_map(RouteTypes::of(...), [...$routes->layouts(), ...$routes->pages()]),
         $actions->all(),
     );
@@ -101,13 +101,14 @@ function generated(): array
  * an error, so a type that quietly became `any` fails the compile too.
  */
 const CONSUMER = <<<'TS'
-    import { find } from '@queries/sites';
+    import { find, stats } from '@queries/sites';
     import { ping, searchSites } from '@queries';
     import { rename } from '@actions/SiteActions';
     import { route, type ActionResult, type CgSite, type LayoutProps, type PageProps } from './generated';
 
     export async function use(): Promise<string[]> {
       const site: CgSite = await find({ site: 's-1' });
+      const counted: CgSite = await stats({ site: 's-1', rack: null });
       const found: CgSite = await searchSites({ term: 'r', limit: 5, untyped: null });
       const up: boolean = await ping({});
       const result: ActionResult = await rename({ site: 's-1', name: 'R-1', priority: null });
@@ -117,7 +118,14 @@ const CONSUMER = <<<'TS'
       // @ts-expect-error so is a query argument
       await find({});
 
-      return [site.id, found.id, String(up), typeof result, route('sites.rack', { site: 's-1', rack: 'r-1' })];
+      return [
+        site.id,
+        counted.id,
+        found.id,
+        String(up),
+        typeof result,
+        route('sites.rack', { site: 's-1', rack: 'r-1' }),
+      ];
     }
 
     export type RackPage = PageProps<'sites/rack'>['data'];

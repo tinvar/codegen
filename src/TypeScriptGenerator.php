@@ -8,6 +8,7 @@ use Tinvar\Actions\CompiledAction;
 use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
 use Tinvar\Data\DataShape;
+use Tinvar\Orm\Model;
 use Tinvar\Routing\RouteKind;
 use Tinvar\Support\Str;
 
@@ -212,9 +213,14 @@ final class TypeScriptGenerator
                 $type = $parameter->getType();
                 $args[] = [
                     'name' => $parameter->getName(),
-                    'type' => $type === null
-                        ? 'unknown'
-                        : $this->types->map($type, null, "{$class}::__invoke(\${$parameter->getName()})"),
+                    'type' => match (true) {
+                        $type === null => 'unknown',
+                        // A model crosses as its key here too, as QueryRegistry
+                        // resolves it. Mapped as a class, the spec's own
+                        // RackStats was refused as a model on the boundary.
+                        self::isModel($type) => $type->allowsNull() ? 'string | null' : 'string',
+                        default => $this->types->map($type, null, "{$class}::__invoke(\${$parameter->getName()})"),
+                    },
                 ];
             }
         }
@@ -228,6 +234,14 @@ final class TypeScriptGenerator
             'args' => $args,
             'returns' => $returns,
         ];
+    }
+
+    /** The test QueryRegistry applies to find a plain query's model arguments. */
+    private static function isModel(\ReflectionType $type): bool
+    {
+        return $type instanceof \ReflectionNamedType
+            && !$type->isBuiltin()
+            && is_subclass_of($type->getName(), Model::class);
     }
 
     /** @param \ReflectionClass<object> $reflection */

@@ -83,6 +83,14 @@ describe('queries', function () {
             ->toContain('export function searchSites(args: { term: string; limit: number; untyped: unknown }): Promise<CgSite>;');
     });
 
+    // tinvar-spec.md's RackStats takes a Rack. It was refused -- "Cannot map
+    // 'Racks\Models\Rack'" -- though a model argument crosses as its key,
+    // as a batch query's declared arguments already did.
+    it('types a model parameter of a plain query as its key', function () {
+        expect(emit(queries: [F\SiteStats::class]))
+            ->toContain('export function stats(args: { site: string; rack: string | null }): Promise<CgSite>;');
+    });
+
     // Every query went into '@queries/racks', the example app's name.
     it('groups queries by their own prefix, not a fixed module', function () {
         $ts = emit(queries: [F\FindSite::class, F\Ping::class]);

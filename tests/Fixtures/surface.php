@@ -89,6 +89,16 @@ namespace Tinvar\Tests\Codegen\Fixtures {
         }
     }
 
+    // The spec's own RackStats shape: a plain query that takes a model.
+    #[Query(name: 'sites.stats')]
+    final class SiteStats
+    {
+        public function __invoke(\Tinvar\Tests\Orm\Fixtures\Site $site, ?\Tinvar\Tests\Orm\Fixtures\Rack $rack): CgSite
+        {
+            return new CgSite('x');
+        }
+    }
+
     #[Query(name: 'ping')]
     final class Ping
     {
