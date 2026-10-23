@@ -164,7 +164,6 @@ final class TypeScriptGenerator
 
         $reflection = new \ReflectionClass($class);
         $constructorDoc = $reflection->getConstructor()?->getDocComment() ?? false;
-        $namespace = $reflection->getNamespaceName();
         $lines = [];
 
         foreach (DataShape::fieldsOf($class) as $property) {
@@ -177,7 +176,12 @@ final class TypeScriptGenerator
             $hint = DocBlock::typeFor($property->getDocComment(), $field)
                 ?? DocBlock::typeFor($constructorDoc, $field);
 
-            $lines[] = sprintf('  %s: %s;', self::key($field, $where), $this->types->map($type, $hint, $where, $namespace));
+            // Its docblock's names mean what they mean in the file that
+            // declares it.
+            $declaring = $property->getDeclaringClass();
+            $mapped = $this->types->map($type, $hint, $where, $declaring->getNamespaceName(), Imports::of($declaring));
+
+            $lines[] = sprintf('  %s: %s;', self::key($field, $where), $mapped);
         }
 
         $this->interfaces[$class] = sprintf(
@@ -265,6 +269,7 @@ final class TypeScriptGenerator
                 $element['value'],
                 "{$class}::loadMany()",
                 $reflection->getNamespaceName(),
+                Imports::of($reflection),
             );
         }
 
@@ -281,6 +286,7 @@ final class TypeScriptGenerator
             DocBlock::returnType($invoke->getDocComment()),
             "{$class}::__invoke()",
             $reflection->getNamespaceName(),
+            Imports::of($reflection),
         );
     }
 

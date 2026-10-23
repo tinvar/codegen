@@ -24,6 +24,9 @@ final class TypeMapper
     /** Namespace of the class currently being mapped, for short docblock names. */
     private ?string $namespace = null;
 
+    /** @var array<string, string> what that class's file imports with `use`; see Imports */
+    private array $imports = [];
+
     /** @param class-string $class */
     public function register(string $class): string
     {
@@ -54,16 +57,37 @@ final class TypeMapper
     /**
      * @param string|null $namespace the declaring class's namespace, used to
      *                               resolve short names written in docblocks
+     * @param array<string, string> $imports the declaring file's `use`
+     *                                       imports, from Imports::of()
      */
-    public function map(\ReflectionType $type, ?string $docHint, string $where, ?string $namespace = null): string
+    public function map(
+        \ReflectionType $type,
+        ?string $docHint,
+        string $where,
+        ?string $namespace = null,
+        array $imports = [],
+    ): string {
+        return $this->within($namespace, $imports, fn (): string => $this->mapType($type, $docHint, $where));
+    }
+
+    /**
+     * @template T
+     * @param array<string, string> $imports
+     * @param \Closure(): T $map
+     * @return T
+     */
+    private function within(?string $namespace, array $imports, \Closure $map): mixed
     {
-        $previous = $this->namespace;
-        $this->namespace = $namespace ?? $previous;
+        $previous = [$this->namespace, $this->imports];
+        if ($namespace !== null) {
+            $this->namespace = $namespace;
+            $this->imports = $imports;
+        }
 
         try {
-            return $this->mapType($type, $docHint, $where);
+            return $map();
         } finally {
-            $this->namespace = $previous;
+            [$this->namespace, $this->imports] = $previous;
         }
     }
 
@@ -94,11 +118,17 @@ final class TypeMapper
             'string' => 'string',
             'int', 'float' => 'number',
             'bool' => 'boolean',
+            // `string|false`, and true and false on their own (PHP 8.2), are
+            // the literal types TypeScript has too. They were refused as
+            // class names.
+            'true' => 'true',
+            'false' => 'false',
             'null' => 'null',
             'mixed' => 'unknown',
             'array' => $this->mapArray($docHint, $where),
             Lazy::class => $this->mapLazy($docHint, $where),
-            default => $this->mapClass($name, $where),
+            // Reflection names a class in full; there is nothing to resolve.
+            default => $this->mapClass($name, $where, qualified: true),
         };
     }
 
@@ -140,17 +170,14 @@ final class TypeMapper
         return $this->mapElement($element, $where);
     }
 
-    /** Maps a docblock type string, for places where no ReflectionType exists. */
-    public function mapHint(string $hint, string $where, ?string $namespace = null): string
+    /**
+     * Maps a docblock type string, for places where no ReflectionType exists.
+     *
+     * @param array<string, string> $imports
+     */
+    public function mapHint(string $hint, string $where, ?string $namespace = null, array $imports = []): string
     {
-        $previous = $this->namespace;
-        $this->namespace = $namespace ?? $previous;
-
-        try {
-            return $this->mapElement($hint, $where);
-        } finally {
-            $this->namespace = $previous;
-        }
+        return $this->within($namespace, $imports, fn (): string => $this->mapElement($hint, $where));
     }
 
     private function mapElement(string $element, string $where): string
@@ -178,10 +205,24 @@ final class TypeMapper
         };
     }
 
-    private function mapClass(string $name, string $where): string
+    /** @param bool $qualified whether the name is already in full, as Reflection gives one */
+    private function mapClass(string $name, string $where, bool $qualified = false): string
     {
         if (isset($this->names[$name])) {
             return $this->names[$name];
+        }
+
+        // Docblocks are written with the names the file uses, so they are
+        // resolved as PHP resolves that file's names: through its `use`
+        // imports, then its namespace. Only the namespace was tried, so a
+        // class imported from elsewhere was refused unless it happened to
+        // have been emitted already.
+        $resolved = $qualified ? null : $this->resolve($name);
+        if ($resolved !== null && isset($this->names[$resolved])) {
+            return $this->names[$resolved];
+        }
+        if ($resolved !== null && class_exists($resolved) && is_subclass_of($resolved, Data::class)) {
+            return $this->register($resolved);
         }
 
         // Short names from docblocks: match a registered class by its tail.
@@ -195,18 +236,29 @@ final class TypeMapper
             return $this->register($name);
         }
 
-        // Docblocks are written with short names; resolve against the namespace
-        // of the class the field belongs to.
-        if ($this->namespace !== null && !str_contains($name, '\\')) {
-            $qualified = $this->namespace . '\\' . $name;
-            if (class_exists($qualified) && is_subclass_of($qualified, Data::class)) {
-                return $this->register($qualified);
-            }
-        }
-
         throw new CodegenException(
             "Cannot map '{$name}' at {$where}. Only Data objects, scalars, lists and maps cross the boundary; "
             . 'map it to a Data object first.',
         );
+    }
+
+    /**
+     * A docblock name as the file it is written in means it: from the global
+     * namespace with a leading backslash, through an import when its first
+     * segment is one, and otherwise in the file's namespace.
+     */
+    private function resolve(string $name): ?string
+    {
+        if (str_starts_with($name, '\\')) {
+            return substr($name, 1);
+        }
+
+        $segments = explode('\\', $name, 2);
+        $imported = $this->imports[strtolower($segments[0])] ?? null;
+        if ($imported !== null) {
+            return isset($segments[1]) ? "{$imported}\\{$segments[1]}" : $imported;
+        }
+
+        return $this->namespace === null ? null : "{$this->namespace}\\{$name}";
     }
 }

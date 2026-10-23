@@ -24,11 +24,7 @@ final class DocBlock
             return trim($m[1]);
         }
 
-        if (preg_match('/@var\s+(.+?)(?:\s+\$|\s*\*\/|\R)/', $docComment, $m) === 1) {
-            return trim($m[1]);
-        }
-
-        return null;
+        return self::tagType($docComment, 'var');
     }
 
     /** Pulls the `@return` type. */
@@ -38,7 +34,54 @@ final class DocBlock
             return null;
         }
 
-        return preg_match('/@return\s+(.+?)(?:\s*\*\/|\R)/', $docComment, $m) === 1 ? trim($m[1]) : null;
+        return self::tagType($docComment, 'return');
+    }
+
+    /**
+     * The type a tag names: what follows it up to the first space outside
+     * brackets. The rest of the line is the tag's description -- `@var
+     * list<RackData> the racks on this page` -- and it was read as part of
+     * the type, which then mapped to nothing.
+     */
+    private static function tagType(string $docComment, string $tag): ?string
+    {
+        if (preg_match('/@' . $tag . '\s+(.*)$/m', $docComment, $m) !== 1) {
+            return null;
+        }
+
+        $text = (string) preg_replace('/\*\/.*$/', '', $m[1]);
+        $type = '';
+        $depth = 0;
+        $length = \strlen($text);
+
+        for ($i = 0; $i < $length; $i++) {
+            $character = $text[$i];
+
+            if ($depth === 0 && ctype_space($character)) {
+                $next = $i;
+                while ($next < $length && ctype_space($text[$next])) {
+                    $next++;
+                }
+
+                // A union written with spaces, `A | B`, goes on past them.
+                if (($text[$next] ?? '') === '|' || str_ends_with($type, '|')) {
+                    $i = $next - 1;
+                    continue;
+                }
+
+                break;
+            }
+
+            if (str_contains('<{([', $character)) {
+                $depth++;
+            } elseif (str_contains('>})]', $character)) {
+                $depth--;
+            }
+
+            $type .= $character;
+        }
+
+        return $type === '' ? null : $type;
     }
 
     /**
