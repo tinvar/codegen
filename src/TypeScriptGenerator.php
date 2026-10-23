@@ -189,7 +189,7 @@ final class TypeScriptGenerator
 
     /**
      * @param class-string $class
-     * @return array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}
+     * @return array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}
      */
     private function describeQuery(string $class): array
     {
@@ -221,6 +221,10 @@ final class TypeScriptGenerator
                         self::isModel($type) => $type->allowsNull() ? 'string | null' : 'string',
                         default => $this->types->map($type, null, "{$class}::__invoke(\${$parameter->getName()})"),
                     },
+                    // What QueryRegistry::parametersFor() lets a caller leave
+                    // out: a default, or a type that allows null. Typed as
+                    // required, every call had to pass them.
+                    'optional' => $parameter->isDefaultValueAvailable() || $parameter->allowsNull(),
                 ];
             }
         }
@@ -264,12 +268,20 @@ final class TypeScriptGenerator
             );
         }
 
-        $type = $reflection->getMethod('__invoke')->getReturnType();
+        $invoke = $reflection->getMethod('__invoke');
+        $type = $invoke->getReturnType();
         if ($type === null) {
             throw new CodegenException("{$class}::__invoke() needs a return type.");
         }
 
-        return $this->types->map($type, null, "{$class}::__invoke()");
+        // `array` names no element type; the `@return list<SomeData>` does,
+        // read as loadMany()'s is. Without it a list result was refused.
+        return $this->types->map(
+            $type,
+            DocBlock::returnType($invoke->getDocComment()),
+            "{$class}::__invoke()",
+            $reflection->getNamespaceName(),
+        );
     }
 
     /** `racks.unitLoad` -> `@queries/racks`; a name with no prefix -> `@queries`. */
@@ -378,7 +390,7 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}> $queries
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
      * @param list<array{module: string, function: string}> $actions
      */
     private function renderAmbient(array $queries, array $actions): string
@@ -398,7 +410,11 @@ final class TypeScriptGenerator
             $where = "The query `{$query['name']}`";
             $args = implode(
                 '; ',
-                array_map(static fn (array $a): string => self::key($a['name'], $where) . ": {$a['type']}", $query['args']),
+                array_map(
+                    static fn (array $a): string => self::key($a['name'], $where)
+                        . (($a['optional'] ?? false) ? '?' : '') . ": {$a['type']}",
+                    $query['args'],
+                ),
             );
             $modules[$query['module']][] = \sprintf(
                 "  /** Calls the PHP query `%s` over the request's socket. */\n  export function %s(args: { %s }): Promise<%s>;\n",

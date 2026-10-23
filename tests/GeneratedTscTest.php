@@ -90,7 +90,7 @@ function generated(): array
 
     return (new TypeScriptGenerator())->files(
         [F\CgPage::class],
-        [F\FindSite::class, F\SearchSites::class, F\Ping::class, F\SiteStats::class],
+        [F\FindSite::class, F\SearchSites::class, F\Ping::class, F\SiteStats::class, F\SearchWithOptions::class, F\AllSites::class],
         array_map(RouteTypes::of(...), [...$routes->layouts(), ...$routes->pages()]),
         $actions->all(),
     );
@@ -101,14 +101,16 @@ function generated(): array
  * an error, so a type that quietly became `any` fails the compile too.
  */
 const CONSUMER = <<<'TS'
-    import { find, stats } from '@queries/sites';
+    import { all, find, search, stats } from '@queries/sites';
     import { ping, searchSites } from '@queries';
     import { rename } from '@actions/SiteActions';
     import { route, type ActionResult, type CgSite, type LayoutProps, type PageProps } from './generated';
 
     export async function use(): Promise<string[]> {
       const site: CgSite = await find({ site: 's-1' });
-      const counted: CgSite = await stats({ site: 's-1', rack: null });
+      const counted: CgSite = await stats({ site: 's-1' });
+      const searched: CgSite = await search({ term: 'r' });
+      const every: CgSite[] = await all({});
       const found: CgSite = await searchSites({ term: 'r', limit: 5, untyped: null });
       const up: boolean = await ping({});
       const result: ActionResult = await rename({ site: 's-1', name: 'R-1', priority: null });
@@ -121,6 +123,8 @@ const CONSUMER = <<<'TS'
       return [
         site.id,
         counted.id,
+        searched.id,
+        ...every.map((s) => s.id),
         found.id,
         String(up),
         typeof result,

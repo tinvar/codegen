@@ -78,9 +78,10 @@ describe('queries', function () {
             ->toContain('export function find(args: { site: string }): Promise<CgSite>;');
     });
 
+    // An untyped parameter allows null, so QueryRegistry does not require it.
     it('types a plain query by its __invoke, untyped parameters as unknown', function () {
         expect(emit(queries: [F\SearchSites::class]))
-            ->toContain('export function searchSites(args: { term: string; limit: number; untyped: unknown }): Promise<CgSite>;');
+            ->toContain('export function searchSites(args: { term: string; limit: number; untyped?: unknown }): Promise<CgSite>;');
     });
 
     // tinvar-spec.md's RackStats takes a Rack. It was refused -- "Cannot map
@@ -88,7 +89,21 @@ describe('queries', function () {
     // as a batch query's declared arguments already did.
     it('types a model parameter of a plain query as its key', function () {
         expect(emit(queries: [F\SiteStats::class]))
-            ->toContain('export function stats(args: { site: string; rack: string | null }): Promise<CgSite>;');
+            ->toContain('export function stats(args: { site: string; rack?: string | null }): Promise<CgSite>;');
+    });
+
+    // QueryRegistry lets a caller leave out a parameter with a default, or
+    // one that allows null; typed as required, every call had to pass them.
+    it('types a parameter a caller may leave out as optional', function () {
+        expect(emit(queries: [F\SearchWithOptions::class]))
+            ->toContain('export function search(args: { term: string; limit?: number; region?: string | null; floor?: number | null }): Promise<CgSite>;');
+    });
+
+    // `array` says nothing of what is in it; the docblock does, as it does
+    // for a batch query's loadMany().
+    it('types a list result from the @return docblock of __invoke', function () {
+        expect(emit(queries: [F\AllSites::class]))
+            ->toContain('export function all(args: {  }): Promise<CgSite[]>;');
     });
 
     // Every query went into '@queries/racks', the example app's name.

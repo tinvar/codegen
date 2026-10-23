@@ -99,6 +99,28 @@ namespace Tinvar\Tests\Codegen\Fixtures {
         }
     }
 
+    // Parameters a caller may leave out: QueryRegistry requires only those
+    // with no default that do not allow null.
+    #[Query(name: 'sites.search')]
+    final class SearchWithOptions
+    {
+        public function __invoke(string $term, int $limit = 10, ?string $region = null, ?int $floor = null): CgSite
+        {
+            return new CgSite('x');
+        }
+    }
+
+    // A list result: PHP's own type is only `array`.
+    #[Query(name: 'sites.all')]
+    final class AllSites
+    {
+        /** @return list<CgSite> */
+        public function __invoke(): array
+        {
+            return [];
+        }
+    }
+
     #[Query(name: 'ping')]
     final class Ping
     {
