@@ -18,12 +18,13 @@ use Tinvar\Support\Str;
  */
 final class TypeMapper
 {
-    /** @var array<string, string> Data class => emitted interface name */
+    /** @var array<class-string, string> Data class => emitted interface name */
     private array $names = [];
 
     /** Namespace of the class currently being mapped, for short docblock names. */
     private ?string $namespace = null;
 
+    /** @param class-string $class */
     public function register(string $class): string
     {
         if (isset($this->names[$class])) {
@@ -49,7 +50,7 @@ final class TypeMapper
         return isset($this->names[$class]);
     }
 
-    /** @return array<string, string> */
+    /** @return array<class-string, string> */
     public function registered(): array
     {
         return $this->names;

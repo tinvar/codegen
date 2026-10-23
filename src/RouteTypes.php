@@ -56,7 +56,8 @@ final readonly class RouteTypes
             return null;
         }
 
-        /** @var class-string */
-        return $type->getName();
+        $name = $type->getName();
+
+        return class_exists($name) ? $name : null;
     }
 }
