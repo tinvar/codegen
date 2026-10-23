@@ -354,10 +354,21 @@ final class TypeScriptGenerator
         $sections = array_values($this->interfaces);
         $sections[] = $this->renderRoutes($routes);
 
+        // The body ActionEndpoint answers with, not the PHP object: it typed
+        // revalidatedRoutes, revalidatedTags and redirect, none of which the
+        // body has. The tags travel in the x-invalidated-tags header and a
+        // redirect is a 303 with no body, so neither is a field here.
         if ($hasActions) {
-            $sections[] = "export interface ActionResult {\n"
-                . "  revalidatedRoutes: string[];\n  revalidatedTags: string[];\n"
-                . "  flash: Record<string, unknown>;\n  redirect: string | null;\n}\n";
+            $sections[] = "/** What an action's endpoint answers with. Its invalidated tags are in the x-invalidated-tags header; a redirect is a 303. */\n"
+                . "export interface ActionResult {\n"
+                . "  /** What the action handed back with ActionResult::ok() or withValue(), through the encoder. */\n"
+                . "  value: unknown;\n"
+                . "  flash: Record<string, unknown>;\n"
+                . "  /** The routes it revalidated, by name. */\n"
+                . "  revalidated: string[];\n"
+                . "  /** A fresh RSC payload for each mounted page it re-rendered, by page key. */\n"
+                . "  payloads: Record<string, string>;\n"
+                . "}\n";
         }
 
         return $out . implode("\n", array_map(
