@@ -124,13 +124,13 @@ describe('routes', function () {
     it('reads the loader return type as the route data, and none without a loader or Data', function () use ($routes) {
         $byView = [];
         foreach ($routes() as $route) {
-            $byView[$route->view] = $route->dataClass;
+            $byView[$route->view] = $route->dataClasses;
         }
 
-        expect($byView['sites/rack'])->toBe(F\CgPage::class)
-            ->and($byView['sites/layout'])->toBe(F\CgSite::class)
-            ->and($byView['sites/about'])->toBeNull()
-            ->and($byView['sites/raw'])->toBeNull();
+        expect($byView['sites/rack'])->toBe([F\CgPage::class])
+            ->and($byView['sites/layout'])->toBe([F\CgSite::class])
+            ->and($byView['sites/about'])->toBe([])
+            ->and($byView['sites/raw'])->toBe([]);
     });
 
     it('emits page, layout and named-route maps', function () use ($routes) {

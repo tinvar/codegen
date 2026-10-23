@@ -17,9 +17,12 @@ final readonly class RouteTypes
 {
     /**
      * @param list<string> $parameters
-     * @param class-string|null $dataClass the loader's return type, if it has one
+     * @param list<class-string> $dataClasses the classes the loader's return
+     *                                        type names: one, or each of a
+     *                                        union. None without a loader.
      * @param list<string> $segments the path, `racks` or `{rack}` each, which
      *                               the generated route() builds URLs from
+     * @param bool $nullableData whether the loader may return null
      */
     public function __construct(
         public RouteKind $kind,
@@ -27,41 +30,59 @@ final readonly class RouteTypes
         public ?string $name,
         public string $layoutKey,
         public array $parameters,
-        public ?string $dataClass,
+        public array $dataClasses,
         public array $segments = [],
+        public bool $nullableData = false,
     ) {}
 
     public static function of(CompiledRoute $route): self
     {
+        [$classes, $nullable] = self::returnTypeOf($route->class);
+
         return new self(
             kind: $route->kind,
             view: $route->view,
             name: $route->name,
             layoutKey: $route->layoutKey,
             parameters: $route->parameters,
-            dataClass: self::returnTypeOf($route->class),
+            dataClasses: $classes,
             segments: $route->segments,
+            nullableData: $nullable,
         );
     }
 
     /**
+     * The classes a loader may return, and whether it may return null.
+     *
+     * Every member of the type is read. Only a single named class was: a
+     * `?AData` loader lost its null, and an `AData|BData` one was typed as
+     * having no data at all.
+     *
      * @param class-string $class
-     * @return class-string|null
+     * @return array{list<class-string>, bool}
      */
-    private static function returnTypeOf(string $class): ?string
+    private static function returnTypeOf(string $class): array
     {
         $reflection = new \ReflectionClass($class);
         if (!$reflection->hasMethod('__invoke')) {
-            return null;   // "Loaders are optional."
+            return [[], false];   // "Loaders are optional."
         }
 
         $type = $reflection->getMethod('__invoke')->getReturnType();
-        if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
-            return null;
+        $members = match (true) {
+            $type instanceof \ReflectionNamedType => [$type],
+            $type instanceof \ReflectionUnionType => $type->getTypes(),
+            default => [],
+        };
+
+        $classes = [];
+        foreach ($members as $member) {
+            if ($member instanceof \ReflectionNamedType && !$member->isBuiltin() && class_exists($member->getName())) {
+                $classes[] = $member->getName();
+            }
         }
 
-        $name = $type->getName();
-
-        return class_exists($name) ? $name : null;
+        // A loader with no class to describe has no data type, null or not.
+        return [$classes, $classes !== [] && $type->allowsNull()];
     }
 }

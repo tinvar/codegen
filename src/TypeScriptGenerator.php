@@ -114,8 +114,8 @@ final class TypeScriptGenerator
 
         // A route's loader return type is a Data class the components need.
         foreach ($routes as $route) {
-            if ($route->dataClass !== null) {
-                $this->emitData($route->dataClass);
+            foreach ($route->dataClasses as $class) {
+                $this->emitData($class);
             }
         }
 
@@ -479,7 +479,7 @@ final class TypeScriptGenerator
         if ($pages !== []) {
             $out .= "export interface PageDataMap {\n";
             foreach ($pages as $page) {
-                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), $this->nameFor($page->dataClass));
+                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), $this->dataTypeOf($page));
             }
             $out .= "}\n\nexport interface PageParamsMap {\n";
             foreach ($pages as $page) {
@@ -496,7 +496,7 @@ final class TypeScriptGenerator
                 $out .= sprintf(
                     "  %s: %s;\n",
                     self::literal($layout->layoutKey, "The layout {$layout->layoutKey}"),
-                    $this->nameFor($layout->dataClass),
+                    $this->dataTypeOf($layout),
                 );
             }
             $out .= "}\n\n";
@@ -657,10 +657,19 @@ final class TypeScriptGenerator
         return $module;
     }
 
-    /** @param class-string|null $class */
-    private function nameFor(?string $class): string
+    /** What a page or layout's loader returns, as a type: each class it may return, and null if it may. */
+    private function dataTypeOf(RouteTypes $route): string
     {
         // A page or layout with no loader still has props; its data is null.
-        return $class === null ? 'null' : $this->types->register($class);
+        if ($route->dataClasses === []) {
+            return 'null';
+        }
+
+        $names = array_map($this->types->register(...), $route->dataClasses);
+        if ($route->nullableData) {
+            $names[] = 'null';
+        }
+
+        return implode(' | ', $names);
     }
 }

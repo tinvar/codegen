@@ -74,7 +74,7 @@ function emit(array $queries = [], array $routes = [], array $actions = []): str
 
 function page(string $view, ?string $name = null): RouteTypes
 {
-    return new RouteTypes(RouteKind::Page, $view, $name, $view, [], null);
+    return new RouteTypes(RouteKind::Page, $view, $name, $view, [], []);
 }
 
 function action(string $name, string $class = 'App\Tools', string $method = 'ping'): CompiledAction
@@ -101,7 +101,7 @@ describe('a name in a string literal', function () {
             "'n\\': {}; }\\u000adeclare module \\'react\\' { export const injectedByName: 1 }\\u000aexport interface Q { \\'z': Record<string, never>;",
         ],
         'a layout key' => [
-            new RouteTypes(RouteKind::Layout, 'k', null, "k': null; }\ndeclare global { var injectedByLayout: number }\nexport interface L { 'm", [], null),
+            new RouteTypes(RouteKind::Layout, 'k', null, "k': null; }\ndeclare global { var injectedByLayout: number }\nexport interface L { 'm", [], []),
             "'k\\': null; }\\u000adeclare global { var injectedByLayout: number }\\u000aexport interface L { \\'m': null;",
         ],
     ]);
