@@ -183,6 +183,14 @@ final class TypeScriptGenerator
         return $this->types->map($type, null, "{$class}::__invoke()");
     }
 
+    /** `racks.unitLoad` -> `@queries/racks`; a name with no prefix -> `@queries`. */
+    private static function moduleFor(string $wireName): string
+    {
+        $dot = strrpos($wireName, '.');
+
+        return $dot === false ? '@queries' : '@queries/' . str_replace('.', '/', substr($wireName, 0, $dot));
+    }
+
     private static function functionName(string $wireName): string
     {
         $parts = explode('.', $wireName);
@@ -206,9 +214,19 @@ final class TypeScriptGenerator
             $out .= $body . "\n";
         }
 
-        if ($queries !== []) {
-            $out .= "declare module '@queries/racks' {\n";
-            foreach ($queries as $query) {
+        // One module per wire-name prefix: `racks.unitLoad` is unitLoad in
+        // '@queries/racks'. Every query went into '@queries/racks' -- the
+        // example app's name, written into the framework -- so any other
+        // application's queries were typed under a module it does not have.
+        $modules = [];
+        foreach ($queries as $query) {
+            $modules[self::moduleFor($query['name'])][] = $query;
+        }
+        ksort($modules);
+
+        foreach ($modules as $module => $members) {
+            $out .= "declare module '{$module}' {\n";
+            foreach ($members as $query) {
                 $args = implode(
                     '; ',
                     array_map(static fn (array $a): string => "{$a['name']}: {$a['type']}", $query['args']),
