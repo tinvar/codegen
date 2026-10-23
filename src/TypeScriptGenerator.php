@@ -20,6 +20,22 @@ use Tinvar\Support\Str;
  */
 final class TypeScriptGenerator
 {
+    /** What an identifier written into the output must look like, exactly. */
+    private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
+
+    /**
+     * Words a function or interface cannot be named in a module: the reserved
+     * words, the strict-mode ones (modules are strict), and the two names
+     * strict mode will not bind.
+     */
+    private const RESERVED = [
+        'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+        'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import',
+        'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try',
+        'typeof', 'var', 'void', 'while', 'with', 'implements', 'interface', 'let', 'package', 'private',
+        'protected', 'public', 'static', 'yield', 'arguments', 'eval',
+    ];
+
     private TypeMapper $types;
 
     /** @var array<string, string> class => emitted interface body */
@@ -82,7 +98,7 @@ final class TypeScriptGenerator
             );
         }
 
-        $name = $this->types->register($class);
+        $name = self::identifier($this->types->register($class), $class);
         $this->interfaces[$class] = '';   // claim the slot before recursing
 
         $reflection = new \ReflectionClass($class);
@@ -100,7 +116,7 @@ final class TypeScriptGenerator
             $hint = DocBlock::typeFor($property->getDocComment(), $field)
                 ?? DocBlock::typeFor($constructorDoc, $field);
 
-            $lines[] = sprintf('  %s: %s;', $field, $this->types->map($type, $hint, $where, $namespace));
+            $lines[] = sprintf('  %s: %s;', self::key($field, $where), $this->types->map($type, $hint, $where, $namespace));
         }
 
         $this->interfaces[$class] = sprintf(
@@ -112,7 +128,7 @@ final class TypeScriptGenerator
 
     /**
      * @param class-string $class
-     * @return array{name: string, function: string, args: list<array{name: string, type: string}>, returns: string}
+     * @return array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}
      */
     private function describeQuery(string $class): array
     {
@@ -147,7 +163,8 @@ final class TypeScriptGenerator
 
         return [
             'name' => $wireName,
-            'function' => self::functionName($wireName),
+            'module' => self::module(self::moduleFor($wireName), "The query `{$wireName}` ({$class})"),
+            'function' => self::identifier(self::functionName($wireName), "The query `{$wireName}` ({$class})"),
             'args' => $args,
             'returns' => $returns,
         ];
@@ -198,7 +215,7 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @param list<array{name: string, function: string, args: list<array{name: string, type: string}>, returns: string}> $queries
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string}>, returns: string}> $queries
      * @param list<RouteTypes>     $routes
      * @param list<CompiledAction> $actions
      */
@@ -218,20 +235,21 @@ final class TypeScriptGenerator
         // application's queries were typed under a module it does not have.
         $modules = [];
         foreach ($queries as $query) {
-            $modules[self::moduleFor($query['name'])][] = $query;
+            $modules[$query['module']][] = $query;
         }
         ksort($modules);
 
         foreach ($modules as $module => $members) {
-            $out .= "declare module '{$module}' {\n";
+            $out .= sprintf("declare module %s {\n", self::literal((string) $module, "The module {$module}"));
             foreach ($members as $query) {
+                $where = "The query `{$query['name']}`";
                 $args = implode(
                     '; ',
-                    array_map(static fn (array $a): string => "{$a['name']}: {$a['type']}", $query['args']),
+                    array_map(static fn (array $a): string => self::key($a['name'], $where) . ": {$a['type']}", $query['args']),
                 );
                 $out .= sprintf(
                     "  /** Calls the PHP query `%s` over the request's socket. */\n  export function %s(args: { %s }): Promise<%s>;\n",
-                    $query['name'],
+                    self::comment($query['name']),
                     $query['function'],
                     $args,
                     $query['returns'],
@@ -269,11 +287,11 @@ final class TypeScriptGenerator
         if ($pages !== []) {
             $out .= "export interface PageDataMap {\n";
             foreach ($pages as $page) {
-                $out .= sprintf("  '%s': %s;\n", $page->view, $this->nameFor($page->dataClass));
+                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), $this->nameFor($page->dataClass));
             }
             $out .= "}\n\nexport interface PageParamsMap {\n";
             foreach ($pages as $page) {
-                $out .= sprintf("  '%s': %s;\n", $page->view, self::paramsType($page->parameters));
+                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), self::paramsType($page->parameters));
             }
             $out .= "}\n\n";
             $out .= "export type PageProps<V extends keyof PageDataMap> = {\n"
@@ -283,7 +301,11 @@ final class TypeScriptGenerator
         if ($layouts !== []) {
             $out .= "export interface LayoutDataMap {\n";
             foreach ($layouts as $layout) {
-                $out .= sprintf("  '%s': %s;\n", $layout->layoutKey, $this->nameFor($layout->dataClass));
+                $out .= sprintf(
+                    "  %s: %s;\n",
+                    self::literal($layout->layoutKey, "The layout {$layout->layoutKey}"),
+                    $this->nameFor($layout->dataClass),
+                );
             }
             $out .= "}\n\n";
             $out .= "export type LayoutProps<K extends keyof LayoutDataMap> = {\n"
@@ -294,7 +316,11 @@ final class TypeScriptGenerator
         if ($named !== []) {
             $out .= "export interface RouteMap {\n";
             foreach ($named as $route) {
-                $out .= sprintf("  '%s': %s;\n", $route->name, self::paramsType($route->parameters));
+                $out .= sprintf(
+                    "  %s: %s;\n",
+                    self::literal((string) $route->name, "The route {$route->name}"),
+                    self::paramsType($route->parameters),
+                );
             }
             $out .= "}\n\n";
             $out .= "/** Builds a URL for a named route. A missing parameter is a type error. */\n"
@@ -322,18 +348,20 @@ final class TypeScriptGenerator
             . "  flash: Record<string, unknown>;\n  redirect: string | null;\n}\n";
 
         foreach ($byClass as $short => $group) {
-            $out .= sprintf("\ndeclare module '@actions/%s' {\n", $short);
+            $module = self::module("@actions/{$short}", "The actions of {$group[0]->class}");
+            $out .= sprintf("\ndeclare module %s {\n", self::literal($module, "The module {$module}"));
             foreach ($group as $action) {
+                $where = "The action `{$action->name}`";
                 $arguments = [];
                 foreach ($action->models as $parameter => $_) {
-                    $arguments[] = "{$parameter}: string";   // a model crosses as its id
+                    $arguments[] = self::key($parameter, $where) . ': string';   // a model crosses as its id
                 }
                 foreach ($action->formRequests as $class) {
                     foreach (DataShape::fieldsOf($class) as $field) {
                         $type = $field->getType();
                         $arguments[] = sprintf(
                             '%s: %s',
-                            $field->getName(),
+                            self::key($field->getName(), "{$class}::\${$field->getName()}"),
                             $type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
                         );
                     }
@@ -341,8 +369,8 @@ final class TypeScriptGenerator
 
                 $out .= sprintf(
                     "  /** Posts to the PHP action `%s`. */\n  export function %s(args: { %s }): Promise<ActionResult>;\n",
-                    $action->name,
-                    $action->method,
+                    self::comment($action->name),
+                    self::identifier($action->method, "{$action->class}::{$action->method}()"),
                     implode('; ', $arguments),
                 );
             }
@@ -360,9 +388,98 @@ final class TypeScriptGenerator
         }
 
         return '{ ' . implode('; ', array_map(
-            static fn (string $p): string => "{$p}: string",
+            static fn (string $p): string => self::key($p, "The route parameter {$p}") . ': string',
             $parameters,
         )) . ' }';
+    }
+
+    /**
+     * A single-quoted string literal.
+     *
+     * Every name from an attribute that is written into the output as a
+     * string goes through here. Interpolated as they were, a view, route or
+     * module name with a quote in it closed the string and wrote declarations
+     * of its own into every consumer's types. A line terminator cannot stand
+     * in a string literal at all, U+2028 and U+2029 included.
+     */
+    private static function literal(string $value, string $where): string
+    {
+        $escaped = preg_replace_callback(
+            '/[\\\\\'\x00-\x1f\x7f\x{2028}\x{2029}]/u',
+            static fn (array $m): string => match ($m[0]) {
+                '\\' => '\\\\',
+                "'" => "\\'",
+                default => \sprintf('\\u%04x', mb_ord($m[0], 'UTF-8')),
+            },
+            $value,
+        );
+
+        // A pattern with /u fails on a string that is not UTF-8, and such a
+        // name could not be written into a source file faithfully anyway.
+        if ($escaped === null) {
+            throw new CodegenException("{$where} is not valid UTF-8.");
+        }
+
+        return "'{$escaped}'";
+    }
+
+    /**
+     * Text placed inside a block comment: it cannot end the comment, and it
+     * stays on the comment's line.
+     */
+    private static function comment(string $text): string
+    {
+        return str_replace(
+            ['*/', "\r\n", "\r", "\n", "\u{2028}", "\u{2029}"],
+            ['*\/', ' ', ' ', ' ', ' ', ' '],
+            $text,
+        );
+    }
+
+    /**
+     * A name written as code -- a function or an interface -- or a refusal.
+     * There is no escaping an identifier: one that is not exactly a name is
+     * code, and a reserved word is not a name a function can have.
+     */
+    private static function identifier(string $name, string $where): string
+    {
+        if (preg_match(self::IDENTIFIER, $name) !== 1) {
+            throw new CodegenException(
+                "{$where} would be emitted as `{$name}`, which is not a TypeScript identifier. Rename it.",
+            );
+        }
+
+        if (\in_array($name, self::RESERVED, true)) {
+            throw new CodegenException(
+                "{$where} would be emitted as `{$name}`, a reserved word in TypeScript. Rename it.",
+            );
+        }
+
+        return $name;
+    }
+
+    /**
+     * A property name: bare when it is an identifier, as PHP field and
+     * parameter names are in practice, and quoted otherwise. A query's
+     * argument names are attribute keys, which can hold anything.
+     */
+    private static function key(string $name, string $where): string
+    {
+        return preg_match(self::IDENTIFIER, $name) === 1 ? $name : self::literal($name, $where);
+    }
+
+    /**
+     * A module name, `@queries/...` or `@actions/...`, made of path segments
+     * and nothing else. It is quoted as well; this is what stops a query's
+     * wire name from naming a module that is not one of ours.
+     */
+    private static function module(string $module, string $where): string
+    {
+        if (preg_match('#^@(?:queries|actions)(?:/[A-Za-z0-9_.-]+)*$#D', $module) !== 1) {
+            throw new CodegenException("{$where} would be emitted in `{$module}`, which is not a module name. Rename it.");
+        }
+
+        return $module;
     }
 
     /** @param class-string|null $class */
