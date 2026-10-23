@@ -94,10 +94,8 @@ final class TypeScriptGenerator
             $field = $property->getName();
             $where = "{$class}::\${$field}";
 
-            $type = $property->getType();
-            if ($type === null) {
-                throw new CodegenException("{$where} has no type; Data fields must be typed.");
-            }
+            // Data classes are readonly, and PHP requires a readonly property to be typed.
+            $type = $property->getType() ?? throw new CodegenException("{$where} has no type; Data fields must be typed.");
 
             $hint = DocBlock::typeFor($property->getDocComment(), $field)
                 ?? DocBlock::typeFor($constructorDoc, $field);

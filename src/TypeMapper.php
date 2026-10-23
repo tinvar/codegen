@@ -45,11 +45,6 @@ final class TypeMapper
         return $this->names[$class] = $short;
     }
 
-    public function isRegistered(string $class): bool
-    {
-        return isset($this->names[$class]);
-    }
-
     /** @return array<class-string, string> */
     public function registered(): array
     {
