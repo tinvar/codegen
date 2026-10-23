@@ -78,7 +78,7 @@ final class TypeScriptGenerator
 
         if (!is_subclass_of($class, Data::class)) {
             throw new CodegenException(
-                "{$class} is not a Data object. Only Data objects cross to the renderer, so only they get types."
+                "{$class} is not a Data object. Only Data objects cross to the renderer, so only they get types.",
             );
         }
 
@@ -164,7 +164,7 @@ final class TypeScriptGenerator
             $element = DocBlock::elementType(DocBlock::returnType($doc) ?? '');
             if ($element === null) {
                 throw new CodegenException(
-                    "{$class}::loadMany() needs an `@return list<SomeData>` docblock so its call site can be typed."
+                    "{$class}::loadMany() needs an `@return list<SomeData>` docblock so its call site can be typed.",
                 );
             }
 
