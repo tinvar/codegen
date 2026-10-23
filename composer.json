@@ -1,0 +1,14 @@
+{
+  "name": "tinvar/codegen",
+  "description": "Generates TypeScript from Tinvar Data objects, queries and routes.",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.5",
+    "tinvar/framework": "@dev"
+  },
+  "autoload": {
+    "psr-4": { "Tinvar\\Codegen\\": "src/" }
+  },
+  "minimum-stability": "stable"
+}
