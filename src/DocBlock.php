@@ -49,7 +49,7 @@ final class DocBlock
         if ($hint === null) {
             return null;
         }
-        $hint = trim($hint);
+        $hint = self::withoutNull(trim($hint));
 
         if (preg_match('/^(?:list|non-empty-list)<(.+)>$/s', $hint, $m) === 1) {
             return ['key' => null, 'value' => $m[1]];
@@ -79,6 +79,21 @@ final class DocBlock
         return preg_match('/Lazy<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
     }
 
+    /**
+     * `list<T>|null` is how a nullable array is written; whether it may be
+     * null comes from the PHP type, so the docblock's `null` is dropped. It
+     * was read as one opaque hint, and every nullable list was refused.
+     */
+    private static function withoutNull(string $hint): string
+    {
+        $parts = array_values(array_filter(
+            self::splitTopLevel($hint, '|'),
+            static fn (string $part): bool => $part !== 'null',
+        ));
+
+        return \count($parts) === 1 ? $parts[0] : $hint;
+    }
+
     private static function keyType(string $key): string
     {
         return match (trim($key)) {
@@ -89,7 +104,7 @@ final class DocBlock
     }
 
     /** @return list<string> splits `string, Foo<int, int>` without cutting inside <> */
-    private static function splitTopLevel(string $input): array
+    private static function splitTopLevel(string $input, string $separator = ','): array
     {
         $parts = [];
         $depth = 0;
@@ -100,7 +115,7 @@ final class DocBlock
                 $depth++;
             } elseif ($character === '>') {
                 $depth--;
-            } elseif ($character === ',' && $depth === 0) {
+            } elseif ($character === $separator && $depth === 0) {
                 $parts[] = trim($current);
                 $current = '';
                 continue;
