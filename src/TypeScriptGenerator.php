@@ -45,6 +45,9 @@ final class TypeScriptGenerator
     /** Where the MergeField and ScrollField types are declared. */
     public const MERGE_RUNTIME = '@tinvar/react/merge';
 
+    /** Where the Unrequested type an #[Optional] field may be sent as is declared. */
+    public const OPTIONAL_RUNTIME = '@tinvar/react/optional';
+
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
 
@@ -74,6 +77,9 @@ final class TypeScriptGenerator
 
     /** Whether any emitted field is #[Merge], so the module needs the MergeField type. */
     private bool $merges = false;
+
+    /** Whether any emitted field is #[Optional], so the module needs the Unrequested type. */
+    private bool $optionals = false;
 
     /**
      * @param string $module how the ambient file imports the module file: the
@@ -184,6 +190,7 @@ final class TypeScriptGenerator
         $imported = [
             'OnceField' => $this->onces,
             'MergeField' => $this->merges,
+            'Unrequested' => $this->optionals,
             'ScrollField' => $this->types->mappedScroll(),
         ];
         foreach ($imported as $type => $used) {
@@ -220,6 +227,7 @@ final class TypeScriptGenerator
         $rescued = DataShape::rescued($class);
         $once = DataShape::once($class);
         $merged = DataShape::merged($class);
+        $optional = DataShape::optional($class);
         $lines = [];
 
         foreach (DataShape::fieldsOf($class) as $property) {
@@ -270,6 +278,16 @@ final class TypeScriptGenerator
             if (isset($once[$field])) {
                 $mapped = sprintf('OnceField<%s>', $mapped);
                 $this->onces = true;
+            }
+
+            // Its value when a partial reload asked for it by name, and the
+            // path that would otherwise: what the encoder sends for an
+            // #[Optional] field, so a component says what it shows until the
+            // field is asked for. DataShape has already refused one that is
+            // not Lazy.
+            if (isset($optional[$field])) {
+                $mapped .= ' | Unrequested';
+                $this->optionals = true;
             }
 
             $lines[] = sprintf('  %s: %s;', self::key($field, $where), $mapped);
@@ -523,6 +541,9 @@ final class TypeScriptGenerator
         }
         if ($this->onces) {
             $imports .= \sprintf("import type { OnceField } from %s;\n", self::literal(self::ONCE_RUNTIME, 'The once runtime'));
+        }
+        if ($this->optionals) {
+            $imports .= \sprintf("import type { Unrequested } from %s;\n", self::literal(self::OPTIONAL_RUNTIME, 'The optional runtime'));
         }
         $merging = array_values(array_filter([
             $this->merges ? 'MergeField' : null,
