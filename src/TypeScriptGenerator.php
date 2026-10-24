@@ -39,6 +39,12 @@ final class TypeScriptGenerator
     /** Where the Rescued type a #[Rescue] field may be sent as is declared. */
     public const RESCUE_RUNTIME = '@tinvar/react/rescue';
 
+    /** Where the OnceField type a #[Once] field is sent as is declared. */
+    public const ONCE_RUNTIME = '@tinvar/react/once';
+
+    /** Where the MergeField and ScrollField types are declared. */
+    public const MERGE_RUNTIME = '@tinvar/react/merge';
+
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
 
@@ -62,6 +68,12 @@ final class TypeScriptGenerator
 
     /** Whether any emitted field is #[Rescue], so the module needs the Rescued type. */
     private bool $rescues = false;
+
+    /** Whether any emitted field is #[Once], so the module needs the OnceField type. */
+    private bool $onces = false;
+
+    /** Whether any emitted field is #[Merge], so the module needs the MergeField type. */
+    private bool $merges = false;
 
     /**
      * @param string $module how the ambient file imports the module file: the
@@ -169,6 +181,16 @@ final class TypeScriptGenerator
                 'A Data class named Rescued would clash with the type a #[Rescue] field is sent as. Rename it.',
             );
         }
+        $imported = [
+            'OnceField' => $this->onces,
+            'MergeField' => $this->merges,
+            'ScrollField' => $this->types->mappedScroll(),
+        ];
+        foreach ($imported as $type => $used) {
+            if ($used && \in_array($type, $this->types->registered(), true)) {
+                throw new CodegenException("A Data class named {$type} would clash with the type of the same name the module imports. Rename it.");
+            }
+        }
 
         return [
             'module' => $this->renderModule($routes, $actions !== []),
@@ -196,6 +218,8 @@ final class TypeScriptGenerator
         $reflection = new \ReflectionClass($class);
         $constructorDoc = $reflection->getConstructor()?->getDocComment() ?? false;
         $rescued = DataShape::rescued($class);
+        $once = DataShape::once($class);
+        $merged = DataShape::merged($class);
         $lines = [];
 
         foreach (DataShape::fieldsOf($class) as $property) {
@@ -227,6 +251,25 @@ final class TypeScriptGenerator
                 }
                 $mapped .= ' | Rescued';
                 $this->rescues = true;
+            }
+
+            // Its items, with what the browser merges them by -- what the
+            // encoder sends for a #[Merge] field. DataShape has already
+            // refused one that is not a list.
+            if (isset($merged[$field])) {
+                if (!str_ends_with($mapped, '[]')) {
+                    throw new CodegenException("{$where} is #[Merge], so its docblock must say what it is a list of.");
+                }
+                $mapped = sprintf('MergeField<%s>', substr($mapped, 0, -2));
+                $this->merges = true;
+            }
+
+            // Its value, or -- in a response to a client that holds it -- its
+            // key alone, so a component cannot read the value without going
+            // through <Once>, which renders from what the browser kept.
+            if (isset($once[$field])) {
+                $mapped = sprintf('OnceField<%s>', $mapped);
+                $this->onces = true;
             }
 
             $lines[] = sprintf('  %s: %s;', self::key($field, $where), $mapped);
@@ -473,6 +516,20 @@ final class TypeScriptGenerator
         // two declarations of one shape are a drift waiting to happen.
         if ($this->rescues) {
             $imports .= \sprintf("import type { Rescued } from %s;\n", self::literal(self::RESCUE_RUNTIME, 'The rescue runtime'));
+        }
+        if ($this->onces) {
+            $imports .= \sprintf("import type { OnceField } from %s;\n", self::literal(self::ONCE_RUNTIME, 'The once runtime'));
+        }
+        $merging = array_values(array_filter([
+            $this->merges ? 'MergeField' : null,
+            $this->types->mappedScroll() ? 'ScrollField' : null,
+        ]));
+        if ($merging !== []) {
+            $imports .= \sprintf(
+                "import type { %s } from %s;\n",
+                implode(', ', $merging),
+                self::literal(self::MERGE_RUNTIME, 'The merge runtime'),
+            );
         }
         $out .= $imports === '' ? "\n" : "\n{$imports}\n";
 

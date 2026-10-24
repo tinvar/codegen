@@ -122,6 +122,16 @@ final class DocBlock
         return preg_match('/Lazy<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
     }
 
+    /** The item type of `Scroll<T>`, written with or without its namespace. */
+    public static function scrollType(?string $hint): ?string
+    {
+        if ($hint === null) {
+            return null;
+        }
+
+        return preg_match('/^(?:\\\\?Tinvar\\\\Data\\\\)?Scroll<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
+    }
+
     /**
      * `list<T>|null` is how a nullable array is written; whether it may be
      * null comes from the PHP type, so the docblock's `null` is dropped. It

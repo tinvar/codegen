@@ -6,6 +6,7 @@ namespace Tinvar\Codegen;
 
 use Tinvar\Data\Data;
 use Tinvar\Data\Lazy;
+use Tinvar\Data\Scroll;
 use Tinvar\Support\Str;
 
 /**
@@ -26,6 +27,9 @@ final class TypeMapper
 
     /** @var array<string, string> what that class's file imports with `use`; see Imports */
     private array $imports = [];
+
+    /** Whether a Scroll has been mapped; see mappedScroll(). */
+    private bool $scrolls = false;
 
     /** @param class-string $class */
     public function register(string $class): string
@@ -127,6 +131,7 @@ final class TypeMapper
             'mixed' => 'unknown',
             'array' => $this->mapArray($docHint, $where),
             Lazy::class => $this->mapLazy($docHint, $where),
+            Scroll::class => $this->mapScroll($docHint, $where),
             // Reflection names a class in full; there is nothing to resolve.
             default => $this->mapClass($name, $where, qualified: true),
         };
@@ -171,6 +176,30 @@ final class TypeMapper
     }
 
     /**
+     * `Scroll<T>` becomes `ScrollField<T>`: one page of items, and where
+     * they sit among the pages -- what the encoder sends for a Scroll.
+     */
+    private function mapScroll(?string $docHint, string $where): string
+    {
+        $element = DocBlock::scrollType($docHint);
+        if ($element === null) {
+            throw new CodegenException(
+                "No item type for the Scroll field at {$where}. Add `@var Scroll<OrderData>`.",
+            );
+        }
+
+        $this->scrolls = true;
+
+        return sprintf('ScrollField<%s>', $this->mapElement($element, $where));
+    }
+
+    /** Whether any Scroll was mapped, so the module needs the ScrollField type. */
+    public function mappedScroll(): bool
+    {
+        return $this->scrolls;
+    }
+
+    /**
      * Maps a docblock type string, for places where no ReflectionType exists.
      *
      * @param array<string, string> $imports
@@ -186,6 +215,14 @@ final class TypeMapper
 
         if (str_ends_with($element, '[]')) {
             return $this->mapElement(substr($element, 0, -2), $where) . '[]';
+        }
+
+        // A Scroll inside a Lazy, say: the same shape as one in a field.
+        $scroll = DocBlock::scrollType($element);
+        if ($scroll !== null) {
+            $this->scrolls = true;
+
+            return sprintf('ScrollField<%s>', $this->mapElement($scroll, $where));
         }
 
         $inner = DocBlock::elementType($element);
