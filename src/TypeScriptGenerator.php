@@ -14,12 +14,13 @@ use Tinvar\Support\Str;
 
 /**
  * Emits TypeScript for the Data objects a build uses, plus typed `@queries/*`
- * stubs (tinvar-spec.md, "Data boundary and TypeScript codegen").
+ * stubs and `@actions/*` references (tinvar-spec.md, "Data boundary and
+ * TypeScript codegen").
  *
  * Fields come from DataShape, the same source the encoder walks, so the
  * generated interface always describes the payload that is actually produced.
  *
- * A build writes two files side by side; see files(). They were one, and
+ * A build writes its files side by side; see files(). The first two were one, and
  * one file cannot be both: the interfaces are imported by path, so it has
  * top-level exports -- and in a file with top-level exports `declare module
  * '@queries/racks'` is an augmentation of a module that does not exist, not
@@ -30,6 +31,9 @@ final class TypeScriptGenerator
 {
     /** Where the generated route() gets its runtime. */
     public const ROUTE_RUNTIME = '@tinvar/react/route';
+
+    /** Where the generated action references get theirs. */
+    public const ACTION_RUNTIME = '@tinvar/react/action';
 
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
@@ -81,23 +85,34 @@ final class TypeScriptGenerator
     }
 
     /**
-     * The two files a build writes, side by side.
+     * The files a build writes.
      *
      *   module   A TypeScript module (`generated.ts`): the Data interfaces,
      *            PageProps and LayoutProps, ActionResult, and route() -- a
      *            real function, built on ROUTE_RUNTIME, so importing it
      *            resolves at build time as well as type-checking.
      *   ambient  A declaration file (`modules.d.ts`) with no top-level import
-     *            or export, holding `declare module '@queries/...'` and
-     *            `'@actions/...'`. Being a script is what makes each one a
-     *            declaration. Each module takes the types it names from the
-     *            module file, by the path given to the constructor.
+     *            or export, holding `declare module '@queries/...'`. Being a
+     *            script is what makes each one a declaration. Each module
+     *            takes the types it names from the module file, by the path
+     *            given to the constructor.
+     *   actions  One real module per class with #[Action] methods, by the
+     *            class's short name, for an `actions/` directory beside the
+     *            other two that the app maps `@actions/*` to. Each exports
+     *            one reference per action, built on ACTION_RUNTIME.
+     *
+     * Actions are modules of their own, not ambient declarations as queries
+     * are: a query is called by a server component through the render's
+     * socket, but an action reference is a VALUE -- handed to <Form action>,
+     * called from a client component, given `.optimistic()` -- and the
+     * declarations it once had described functions nothing defined, so the
+     * first import of one failed the build.
      *
      * @param list<class-string<Data>> $dataClasses
      * @param list<class-string>       $queryClasses
      * @param list<RouteTypes>         $routes
      * @param list<CompiledAction>     $actions
-     * @return array{module: string, ambient: string}
+     * @return array{module: string, ambient: string, actions: array<string, string>}
      */
     public function files(
         array $dataClasses,
@@ -142,7 +157,8 @@ final class TypeScriptGenerator
 
         return [
             'module' => $this->renderModule($routes, $actions !== []),
-            'ambient' => $this->renderAmbient($queries, $described),
+            'ambient' => $this->renderAmbient($queries),
+            'actions' => $this->renderActions($described),
         ];
     }
 
@@ -307,7 +323,7 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @return array{module: string, function: string}
+     * @return array{file: string, class: string, declaration: string}
      */
     private function describeAction(CompiledAction $action): array
     {
@@ -327,17 +343,71 @@ final class TypeScriptGenerator
             }
         }
 
+        // Checked as a module path first, for the message, and then as an
+        // identifier: it names a FILE now, and a name that is a path segment
+        // but not an identifier -- `..` -- would be written somewhere else.
         $module = self::module('@actions/' . Str::shortName($action->class), "The actions of {$action->class}");
+        $file = self::identifier(substr($module, \strlen('@actions/')), "The actions of {$action->class}");
 
         return [
-            'module' => $module,
-            'function' => \sprintf(
-                "  /** Posts to the PHP action `%s`. */\n  export function %s(args: { %s }): Promise<ActionResult>;\n",
+            'file' => $file,
+            'class' => $action->class,
+            'declaration' => \sprintf(
+                "/** Posts to the PHP action `%s`. */\nexport const %s = action<{ %s }, ActionResult>(%s);\n",
                 self::comment($action->name),
                 self::identifier($action->method, "{$action->class}::{$action->method}()"),
                 implode('; ', $arguments),
+                self::literal($action->name, $where),
             ),
         ];
+    }
+
+    /**
+     * One module per class: its action references, and the types they name
+     * from the module file.
+     *
+     * @param list<array{file: string, class: string, declaration: string}> $actions
+     * @return array<string, string> file name, without extension => source
+     */
+    private function renderActions(array $actions): array
+    {
+        /** @var array<string, array{class: string, declarations: list<string>}> $byFile */
+        $byFile = [];
+        foreach ($actions as $action) {
+            $byFile[$action['file']]['class'] = $action['class'];
+            $byFile[$action['file']]['declarations'][] = $action['declaration'];
+        }
+        ksort($byFile);
+
+        $files = [];
+        foreach ($byFile as $file => ['class' => $class, 'declarations' => $declarations]) {
+            $members = implode('', $declarations);
+            $types = $this->typesNamedIn($members, ['ActionResult']);
+
+            $files[$file] = $this->preamble(self::comment("The actions of {$class}: call one, or give it to <Form action>."))
+                . \sprintf("\nimport { action } from %s;\n", self::literal(self::ACTION_RUNTIME, 'The action runtime'))
+                . \sprintf(
+                    "import type { %s } from %s;\n\n",
+                    implode(', ', $types),
+                    self::literal(self::fromActionsDirectory($this->module), 'The path of the module file'),
+                )
+                . implode("\n", $declarations);
+        }
+
+        return $files;
+    }
+
+    /**
+     * The module file's path as an action module, one directory down, sees
+     * it. A bare specifier -- a package -- is the same from anywhere.
+     */
+    private static function fromActionsDirectory(string $module): string
+    {
+        return match (true) {
+            str_starts_with($module, './') => '../' . substr($module, 2),
+            str_starts_with($module, '../') => '../' . $module,
+            default => $module,
+        };
     }
 
     private function preamble(string $about): string
@@ -377,7 +447,7 @@ final class TypeScriptGenerator
         // body has. The tags travel in the x-invalidated-tags header and a
         // redirect is a 303 with no body, so neither is a field here.
         if ($hasActions) {
-            $sections[] = "/** What an action's endpoint answers with. Its invalidated tags are in the x-invalidated-tags header; a redirect is a 303. */\n"
+            $sections[] = "/** What an action's endpoint answers with. Its invalidated tags are in the x-invalidated-tags header; a redirect is a 303 (409 + X-Redirect to the client router). */\n"
                 . "export interface ActionResult {\n"
                 . "  /** What the action handed back with ActionResult::ok() or withValue(), through the encoder. */\n"
                 . "  value: unknown;\n"
@@ -397,12 +467,11 @@ final class TypeScriptGenerator
 
     /**
      * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
-     * @param list<array{module: string, function: string}> $actions
      */
-    private function renderAmbient(array $queries, array $actions): string
+    private function renderAmbient(array $queries): string
     {
         $out = $this->preamble(
-            "The @queries/* and @actions/* modules. Nothing here is imported or exported at the top level, so\n"
+            "The @queries/* modules. Nothing here is imported or exported at the top level, so\n"
             . "// each `declare module` declares its module rather than augmenting one that does not exist.",
         );
 
@@ -432,13 +501,8 @@ final class TypeScriptGenerator
         }
         ksort($modules);
 
-        $byClass = [];
-        foreach ($actions as $action) {
-            $byClass[$action['module']][] = $action['function'];
-        }
-
-        foreach ([...$modules, ...$byClass] as $module => $members) {
-            $aliases = $this->aliasesFor(implode('', $members), str_starts_with((string) $module, '@actions'));
+        foreach ($modules as $module => $members) {
+            $aliases = $this->aliasesFor(implode('', $members));
 
             $out .= \sprintf("\ndeclare module %s {\n", self::literal((string) $module, "The module {$module}"));
             $out .= $aliases === '' ? '' : $aliases . "\n";
@@ -458,24 +522,36 @@ final class TypeScriptGenerator
      * an ambient module may not import by a relative path (TS2439), and
      * aliases so the signatures read as the module file's do.
      */
-    private function aliasesFor(string $members, bool $action): string
+    private function aliasesFor(string $members): string
     {
-        $names = $action ? ['ActionResult'] : [];
+        $module = self::literal($this->module, 'The path of the module file');
+
+        return implode('', array_map(
+            static fn (string $name): string => "  type {$name} = import({$module}).{$name};\n",
+            $this->typesNamedIn($members),
+        ));
+    }
+
+    /**
+     * The module file's types that rendered members name, sorted, plus any
+     * they always need.
+     *
+     * @param list<string> $always
+     * @return list<string>
+     */
+    private function typesNamedIn(string $members, array $always = []): array
+    {
+        $names = $always;
         foreach ($this->types->registered() as $name) {
             if (preg_match('/\b' . preg_quote($name, '/') . '\b/', $members) === 1) {
                 $names[] = $name;
             }
         }
 
-        $names = array_unique($names);
+        $names = array_values(array_unique($names));
         sort($names);
 
-        $module = self::literal($this->module, 'The path of the module file');
-
-        return implode('', array_map(
-            static fn (string $name): string => "  type {$name} = import({$module}).{$name};\n",
-            $names,
-        ));
+        return $names;
     }
 
     /**

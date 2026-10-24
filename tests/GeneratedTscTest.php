@@ -51,6 +51,10 @@ function compile(array $files): array
             'paths' => [
                 'react' => ["{$root}/node_modules/@types/react"],
                 TypeScriptGenerator::ROUTE_RUNTIME => ["{$root}/packages/react/src/route.d.ts"],
+                TypeScriptGenerator::ACTION_RUNTIME => ["{$root}/packages/react/src/action.d.ts"],
+                // As an app maps it: to the directory the action modules
+                // are written into.
+                '@actions/*' => ['./actions/*'],
             ],
         ],
         'files' => array_keys($files),
@@ -58,6 +62,9 @@ function compile(array $files): array
 
     try {
         foreach ($files as $name => $contents) {
+            if (!is_dir(\dirname("{$dir}/{$name}"))) {
+                mkdir(\dirname("{$dir}/{$name}"));
+            }
             file_put_contents("{$dir}/{$name}", $contents);
         }
 
@@ -72,14 +79,30 @@ function compile(array $files): array
 
         return [proc_close($process), $output];
     } finally {
-        foreach (glob("{$dir}/*") ?: [] as $file) {
-            unlink($file);
+        foreach ([...glob("{$dir}/*/*") ?: [], ...glob("{$dir}/*") ?: []] as $file) {
+            is_dir($file) ? rmdir($file) : unlink($file);
         }
         rmdir($dir);
     }
 }
 
-/** @return array{module: string, ambient: string} */
+/**
+ * Every generated file, by the path a build writes it to.
+ *
+ * @return array<string, string>
+ */
+function written(): array
+{
+    $files = generated();
+    $written = ['generated.ts' => $files['module'], 'modules.d.ts' => $files['ambient']];
+    foreach ($files['actions'] as $class => $contents) {
+        $written["actions/{$class}.ts"] = $contents;
+    }
+
+    return $written;
+}
+
+/** @return array{module: string, ambient: string, actions: array<string, string>} */
 function generated(): array
 {
     $routes = new RouteRegistry();
@@ -114,11 +137,14 @@ const CONSUMER = <<<'TS'
       const found: CgSite = await searchSites({ term: 'r', limit: 5, untyped: null });
       const up: boolean = await ping({});
       const result: ActionResult = await rename({ site: 's-1', name: 'R-1', priority: null });
+      const posts: string = rename.url;
 
       // @ts-expect-error a route parameter left out is a type error
       route('sites.rack', { site: 's-1' });
       // @ts-expect-error so is a query argument
       await find({});
+      // @ts-expect-error and an action's
+      await rename({ site: 's-1' });
 
       return [
         site.id,
@@ -128,6 +154,7 @@ const CONSUMER = <<<'TS'
         found.id,
         String(up),
         typeof result,
+        posts,
         route('sites.rack', { site: 's-1', rack: 'r-1' }),
       ];
     }
@@ -138,19 +165,13 @@ const CONSUMER = <<<'TS'
     TS;
 
 it('compiles, with every query, action and route an app imports resolving', function () {
-    $files = generated();
-
-    [$exit, $output] = compile([
-        'consumer.ts' => CONSUMER,
-        'generated.ts' => $files['module'],
-        'modules.d.ts' => $files['ambient'],
-    ]);
+    [$exit, $output] = compile(['consumer.ts' => CONSUMER, ...written()]);
 
     expect($output)->toBe('')
         ->and($exit)->toBe(0);
 })->skip(!is_file(TSC), 'TypeScript is not installed (npm ci).');
 
-it('keeps the query and action modules out of the module file, where they would be augmentations', function () {
+it('keeps the query modules out of the module file, where they would be augmentations', function () {
     $files = generated();
 
     expect($files['module'])->not->toContain('declare module')

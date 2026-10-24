@@ -19,10 +19,12 @@ use Tinvar\Tests\Codegen\Fixtures as F;
 require_once __DIR__ . '/Fixtures/surface.php';
 require_once __DIR__ . '/../../framework/tests/Orm/Fixtures/models.php';
 
-/** The module file, then the ambient one. */
+/** The module file, then the ambient one, then each action module. */
 function emit(array $data = [], array $queries = [], array $routes = [], array $actions = [], string $header = ''): string
 {
-    return implode("\n", (new TypeScriptGenerator($header))->files($data, $queries, $routes, $actions));
+    $files = (new TypeScriptGenerator($header))->files($data, $queries, $routes, $actions);
+
+    return implode("\n", [$files['module'], $files['ambient'], ...array_values($files['actions'])]);
 }
 
 describe('data shapes', function () {
@@ -177,10 +179,33 @@ describe('actions', function () {
         $registry = new ActionRegistry();
         $registry->register(F\SiteActions::class);
 
-        expect(emit(actions: $registry->all()))
-            ->toContain('export interface ActionResult {')
-            ->toContain("declare module '@actions/SiteActions' {")
-            ->toContain('export function rename(args: { site: string; name: string; priority: number | null }): Promise<ActionResult>;');
+        $files = (new TypeScriptGenerator())->files([], [], [], $registry->all());
+
+        expect($files['module'])->toContain('export interface ActionResult {')
+            ->and(array_keys($files['actions']))->toBe(['SiteActions'])
+            ->and($files['actions']['SiteActions'])
+            ->toContain("import { action } from '@tinvar/react/action';")
+            ->toContain("import type { ActionResult } from '../generated';")
+            ->toContain("export const rename = action<{ site: string; name: string; priority: number | null }, ActionResult>('SiteActions.rename');")
+            ->and($files['ambient'])->not->toContain('@actions');
+    });
+
+    // A reference is a value, handed to <Form> and called: a declaration of
+    // a function nothing defined failed the build on its first import.
+    it('writes a real module per class rather than declaring one', function () {
+        $registry = new ActionRegistry();
+        $registry->register(F\SiteActions::class);
+
+        expect((new TypeScriptGenerator())->files([], [], [], $registry->all())['actions']['SiteActions'])
+            ->not->toContain('declare');
+    });
+
+    it('imports the module file by its path from the actions directory', function () {
+        $registry = new ActionRegistry();
+        $registry->register(F\SiteActions::class);
+
+        expect((new TypeScriptGenerator(module: '../types/app'))->files([], [], [], $registry->all())['actions']['SiteActions'])
+            ->toContain("from '../../types/app';");
     });
 });
 

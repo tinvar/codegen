@@ -66,10 +66,12 @@ final class QueryNameWithALineTerminator
     }
 }
 
-/** Both files, one after the other: what is asserted here is what text reaches either. */
+/** Every file, one after the other: what is asserted here is what text reaches any. */
 function emit(array $queries = [], array $routes = [], array $actions = []): string
 {
-    return implode("\n", (new TypeScriptGenerator())->files([], $queries, $routes, $actions));
+    $files = (new TypeScriptGenerator())->files([], $queries, $routes, $actions);
+
+    return implode("\n", [$files['module'], $files['ambient'], ...array_values($files['actions'])]);
 }
 
 function page(string $view, ?string $name = null): RouteTypes
@@ -131,8 +133,12 @@ describe('a name in a comment', function () {
         $ts = emit(actions: [action("Tools.ping */ } declare global { var injectedByActionName: string } declare module '@actions/Tools2' { /**")]);
 
         expect($ts)
-            ->toContain("  /** Posts to the PHP action `Tools.ping *\\/ } declare global { var injectedByActionName: string } declare module '@actions/Tools2' { /**`. */\n  export function ping(")
-            ->not->toContain('Tools.ping */');
+            ->toContain("/** Posts to the PHP action `Tools.ping *\\/ } declare global { var injectedByActionName: string } declare module '@actions/Tools2' { /**`. */\nexport const ping = ")
+            // Unescaped only inside the quoted name the reference posts to,
+            // where a comment's end is just text.
+            ->toContain(">('Tools.ping */ } declare global { var injectedByActionName: string } declare module \\'@actions/Tools2\\' { /**');")
+            ->not->toContain('/** Posts to the PHP action `Tools.ping */')
+            ->not->toMatch(INJECTED);
     });
 
     it('stays on its line', function () {
