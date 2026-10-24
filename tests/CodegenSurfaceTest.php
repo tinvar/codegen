@@ -200,6 +200,18 @@ describe('actions', function () {
             ->not->toContain('declare');
     });
 
+    // "Uploaded files are referenced only by a server-issued upload ticket":
+    // what crosses is the reference /_upload answered with, a string.
+    it('types an upload parameter as the reference a form sends, optional where the parameter is', function () {
+        require_once __DIR__ . '/../../framework/tests/Uploads/Fixtures/app.php';
+        $registry = new ActionRegistry();
+        $registry->register(\Tinvar\Tests\Uploads\Fixtures\ProfileActions::class);
+
+        expect((new TypeScriptGenerator())->files([], [], [], $registry->all())['actions']['ProfileActions'])
+            ->toContain("export const avatar = action<{ profile: string; avatar: string }, ActionResult>('profiles.avatar');")
+            ->toContain("export const document = action<{ profile: string; document?: string }, ActionResult>('profiles.document');");
+    });
+
     it('imports the module file by its path from the actions directory', function () {
         $registry = new ActionRegistry();
         $registry->register(F\SiteActions::class);

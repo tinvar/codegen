@@ -407,6 +407,10 @@ final class TypeScriptGenerator
         foreach ($action->models as $parameter => $_) {
             $arguments[] = self::key($parameter, $where) . ': string';   // a model crosses as its id
         }
+        foreach ($action->uploads as $parameter => $_) {
+            // The reference /_upload answered with, never the file itself.
+            $arguments[] = self::key($parameter, $where) . (isset($action->optionalUploads[$parameter]) ? '?: string' : ': string');
+        }
         foreach ($action->formRequests as $class) {
             foreach (DataShape::fieldsOf($class) as $field) {
                 $type = $field->getType();
