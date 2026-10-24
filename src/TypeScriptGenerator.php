@@ -8,6 +8,7 @@ use Tinvar\Actions\CompiledAction;
 use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
 use Tinvar\Data\DataShape;
+use Tinvar\Data\Lazy;
 use Tinvar\Orm\Model;
 use Tinvar\Routing\RouteKind;
 use Tinvar\Support\Str;
@@ -35,6 +36,9 @@ final class TypeScriptGenerator
     /** Where the generated action references get theirs. */
     public const ACTION_RUNTIME = '@tinvar/react/action';
 
+    /** Where the Rescued type a #[Rescue] field may be sent as is declared. */
+    public const RESCUE_RUNTIME = '@tinvar/react/rescue';
+
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
 
@@ -55,6 +59,9 @@ final class TypeScriptGenerator
 
     /** @var array<string, string> class => emitted interface body */
     private array $interfaces = [];
+
+    /** Whether any emitted field is #[Rescue], so the module needs the Rescued type. */
+    private bool $rescues = false;
 
     /**
      * @param string $module how the ambient file imports the module file: the
@@ -121,6 +128,7 @@ final class TypeScriptGenerator
         array $actions = [],
     ): array {
         $this->interfaces = [];
+        $this->rescues = false;
         $this->types = new TypeMapper();
 
         foreach ($dataClasses as $class) {
@@ -155,6 +163,13 @@ final class TypeScriptGenerator
             );
         }
 
+        // The same for the marker type the module imports.
+        if ($this->rescues && \in_array('Rescued', $this->types->registered(), true)) {
+            throw new CodegenException(
+                'A Data class named Rescued would clash with the type a #[Rescue] field is sent as. Rename it.',
+            );
+        }
+
         return [
             'module' => $this->renderModule($routes, $actions !== []),
             'ambient' => $this->renderAmbient($queries),
@@ -180,6 +195,7 @@ final class TypeScriptGenerator
 
         $reflection = new \ReflectionClass($class);
         $constructorDoc = $reflection->getConstructor()?->getDocComment() ?? false;
+        $rescued = DataShape::rescued($class);
         $lines = [];
 
         foreach (DataShape::fieldsOf($class) as $property) {
@@ -196,6 +212,22 @@ final class TypeScriptGenerator
             // declares it.
             $declaring = $property->getDeclaringClass();
             $mapped = $this->types->map($type, $hint, $where, $declaring->getNamespaceName(), Imports::of($declaring));
+
+            // What the encoder sends when the field's resolver throws, so a
+            // component cannot read the value without deciding what to show
+            // instead. Only a Lazy is ever resolved by the encoder, so only a
+            // Lazy can be rescued; on anything else the mark would promise a
+            // marker that is never sent.
+            if (isset($rescued[$field])) {
+                if (!$type instanceof \ReflectionNamedType || $type->getName() !== Lazy::class) {
+                    throw new CodegenException(
+                        "{$where} is marked #[Rescue], which only a Lazy field can be: its value is "
+                        . 'produced before encoding, so there is nothing left to rescue.',
+                    );
+                }
+                $mapped .= ' | Rescued';
+                $this->rescues = true;
+            }
 
             $lines[] = sprintf('  %s: %s;', self::key($field, $where), $mapped);
         }
@@ -436,6 +468,11 @@ final class TypeScriptGenerator
         }
         if ($hasNamed) {
             $imports .= \sprintf("import { routes } from %s;\n", self::literal(self::ROUTE_RUNTIME, 'The route runtime'));
+        }
+        // From the package, not declared here: isRescued() narrows by it, and
+        // two declarations of one shape are a drift waiting to happen.
+        if ($this->rescues) {
+            $imports .= \sprintf("import type { Rescued } from %s;\n", self::literal(self::RESCUE_RUNTIME, 'The rescue runtime'));
         }
         $out .= $imports === '' ? "\n" : "\n{$imports}\n";
 
