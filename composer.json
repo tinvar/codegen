@@ -9,8 +9,14 @@
     "tinvar/framework": "0.4.*",
     "tinvar/support": "0.4.*"
   },
+  "require-dev": {
+    "pestphp/pest": "^4.0",
+    "tinvar/testing": "0.4.*"
+  },
   "autoload": {
-    "psr-4": { "Tinvar\\Codegen\\": "src/" }
+    "psr-4": {
+      "Tinvar\\Codegen\\": "src/"
+    }
   },
   "minimum-stability": "stable"
 }
