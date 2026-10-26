@@ -18,7 +18,7 @@ use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\TypeScriptGenerator;
 use Tinvar\Tests\Codegen\Fixtures as F;
 
-require_once __DIR__ . '/../../framework/tests/Orm/Fixtures/models.php';
+require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
 require_once __DIR__ . '/Fixtures/surface.php';
 
 #[Query(name: 'racks.UnitLoad')]

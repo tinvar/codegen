@@ -17,7 +17,7 @@ use Tinvar\Routing\RouteRegistry;
 use Tinvar\Tests\Codegen\Fixtures as F;
 
 require_once __DIR__ . '/Fixtures/surface.php';
-require_once __DIR__ . '/../../framework/tests/Orm/Fixtures/models.php';
+require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
 
 /** The module file, then the ambient one, then each action module. */
 function emit(array $data = [], array $queries = [], array $routes = [], array $actions = [], string $header = ''): string
