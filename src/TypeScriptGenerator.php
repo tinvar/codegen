@@ -599,7 +599,14 @@ final class TypeScriptGenerator
         }
         $out .= $imports === '' ? "\n" : "\n{$imports}\n";
 
-        $sections = array_values($this->interfaces);
+        // By name, not in the order the classes were met: that order is the
+        // caller's listing, so listing a class a route already reaches -- or
+        // not, or in another order -- moved it, and `codegen --check` read
+        // the move as drift. Names are unique (TypeMapper::register()).
+        $names = $this->types->registered();
+        $interfaces = $this->interfaces;
+        uksort($interfaces, static fn (string $a, string $b): int => strcmp($names[$a] ?? $a, $names[$b] ?? $b));
+        $sections = array_values($interfaces);
         $sections[] = $this->renderRoutes($routes);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
