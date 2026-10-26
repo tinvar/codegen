@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Codegen;
 
 use Tinvar\Data\Data;
-use Tinvar\Data\Lazy;
+use Tinvar\Support\Lazy;
 use Tinvar\Data\Scroll;
 use Tinvar\Support\Str;
 
@@ -130,10 +130,13 @@ final class TypeMapper
             'null' => 'null',
             'mixed' => 'unknown',
             'array' => $this->mapArray($docHint, $where),
-            Lazy::class => $this->mapLazy($docHint, $where),
             Scroll::class => $this->mapScroll($docHint, $where),
             // Reflection names a class in full; there is nothing to resolve.
-            default => $this->mapClass($name, $where, qualified: true),
+            // Lazy by is_a(), so its name from before the split, an alias of
+            // it, is read as Lazy too.
+            default => is_a($name, Lazy::class, true)
+                ? $this->mapLazy($docHint, $where)
+                : $this->mapClass($name, $where, qualified: true),
         };
     }
 

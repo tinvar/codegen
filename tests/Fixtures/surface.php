@@ -61,7 +61,7 @@ namespace Tinvar\Tests\Codegen\Fixtures {
 
     final readonly class CgLazyNoHint extends Data
     {
-        public function __construct(public \Tinvar\Data\Lazy $later) {}
+        public function __construct(public \Tinvar\Support\Lazy $later) {}
     }
 
     final readonly class CgUnknownName extends Data

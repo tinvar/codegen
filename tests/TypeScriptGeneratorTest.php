@@ -6,7 +6,7 @@ use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\TypeScriptGenerator;
 use Tinvar\Data\Data;
 use Tinvar\Data\Encoder;
-use Tinvar\Data\Lazy;
+use Tinvar\Support\Lazy;
 
 final readonly class GenUnit extends Data
 {

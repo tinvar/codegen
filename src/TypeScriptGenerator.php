@@ -8,7 +8,7 @@ use Tinvar\Actions\CompiledAction;
 use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
 use Tinvar\Data\DataShape;
-use Tinvar\Data\Lazy;
+use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
 use Tinvar\Routing\RouteKind;
 use Tinvar\Support\Str;
@@ -292,7 +292,7 @@ final class TypeScriptGenerator
             // Lazy can be rescued; on anything else the mark would promise a
             // marker that is never sent.
             if (isset($rescued[$field])) {
-                if (!$type instanceof \ReflectionNamedType || $type->getName() !== Lazy::class) {
+                if (!$type instanceof \ReflectionNamedType || !is_a($type->getName(), Lazy::class, true)) {
                     throw new CodegenException(
                         "{$where} is marked #[Rescue], which only a Lazy field can be: its value is "
                         . 'produced before encoding, so there is nothing left to rescue.',
