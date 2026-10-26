@@ -125,6 +125,12 @@ final class TypeScriptGenerator
      *            class's short name, for an `actions/` directory beside the
      *            other two that the app maps `@actions/*` to. Each exports
      *            one reference per action, built on ACTION_RUNTIME.
+     *   queries  JSON (`queries.json`): each `@queries/*` module, each
+     *            function in it, and the query that function calls. The
+     *            renderer build reads it to put a page's calls through those
+     *            functions on its route's query allowlist (tinvar-spec.md,
+     *            "Renderer hardening"); the name cannot be read back from the
+     *            function's, since `racks.UnitLoad` is typed as `unitLoad()`.
      *
      * Actions are modules of their own, not ambient declarations as queries
      * are: a query is called by a server component through the render's
@@ -137,7 +143,7 @@ final class TypeScriptGenerator
      * @param list<class-string>       $queryClasses
      * @param list<RouteTypes>         $routes
      * @param list<CompiledAction>     $actions
-     * @return array{module: string, ambient: string, actions: array<string, string>}
+     * @return array{module: string, ambient: string, actions: array<string, string>, queries: string}
      */
     public function files(
         array $dataClasses,
@@ -203,7 +209,42 @@ final class TypeScriptGenerator
             'module' => $this->renderModule($routes, $actions !== []),
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
+            'queries' => self::renderQueryMap($queries),
         ];
+    }
+
+    /**
+     * Which query each `@queries/*` function calls, as JSON.
+     *
+     * Two queries emitted as one function -- `racks.unitLoad` and
+     * `racks.UnitLoad` are both `unitLoad()` in '@queries/racks' -- are
+     * refused: the declaration file would describe one function twice, and
+     * this map could say only one of the queries it calls.
+     *
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
+     */
+    private static function renderQueryMap(array $queries): string
+    {
+        $modules = [];
+        foreach ($queries as $query) {
+            $taken = $modules[$query['module']][$query['function']] ?? null;
+            if ($taken !== null && $taken !== $query['name']) {
+                throw new CodegenException(
+                    "The queries `{$taken}` and `{$query['name']}` would both be emitted as {$query['function']}() in {$query['module']}. Rename one.",
+                );
+            }
+            $modules[$query['module']][$query['function']] = $query['name'];
+        }
+        ksort($modules);
+        foreach ($modules as &$functions) {
+            ksort($functions);
+        }
+        unset($functions);
+
+        return json_encode(
+            ['format' => 1, 'modules' => $modules === [] ? new \stdClass() : $modules],
+            JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+        ) . "\n";
     }
 
     /** @param class-string $class */
