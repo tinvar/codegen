@@ -17,6 +17,7 @@ use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
 use Tinvar\Routing\RouteKind;
 use Tinvar\Support\Str;
+use Tinvar\Transfers\CompiledTransfer;
 
 /**
  * Emits TypeScript for the Data objects a build uses, plus typed `@queries/*`
@@ -61,6 +62,8 @@ final class TypeScriptGenerator
 
     /** Where the generated `channel` gets its runtime (ADR 0069). */
     public const CHANNEL_RUNTIME = '@tinvar/react/channel';
+    /** Where the generated `transfer` gets its runtime (ADR 0070). */
+    public const TRANSFER_RUNTIME = '@tinvar/react/transfer';
 
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
@@ -120,6 +123,7 @@ final class TypeScriptGenerator
      * @param list<SharedTypes>        $shared
      * @param list<CompiledEndpoint>   $endpoints
      * @param list<CompiledChannel>    $channels
+     * @param list<CompiledTransfer>   $transfers
      */
     public function generate(
         array $dataClasses,
@@ -130,8 +134,9 @@ final class TypeScriptGenerator
         array $shared = [],
         array $endpoints = [],
         array $channels = [],
+        array $transfers = [],
     ): string {
-        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared, $endpoints, $channels)['module'];
+        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared, $endpoints, $channels, $transfers)['module'];
     }
 
     /**
@@ -193,6 +198,9 @@ final class TypeScriptGenerator
      * @param list<CompiledChannel>    $channels  the #[Channel]s: a ChannelMap in the module -- each
      *                                            one's parameters and message -- and a `channel`
      *                                            built on CHANNEL_RUNTIME that subscribes to them
+     * @param list<CompiledTransfer>   $transfers the #[Export] and #[Import] classes: an ExportMap and
+     *                                            an ImportMap in the module, and a `transfer` built on
+     *                                            TRANSFER_RUNTIME that starts them by name
      * @return array{module: string, ambient: string, actions: array<string, string>, queries: string, testing: array<string, string>}
      */
     public function files(
@@ -204,6 +212,7 @@ final class TypeScriptGenerator
         array $shared = [],
         array $endpoints = [],
         array $channels = [],
+        array $transfers = [],
     ): array {
         $this->interfaces = [];
         $this->fields = [];
@@ -242,6 +251,7 @@ final class TypeScriptGenerator
         $described = array_map($this->describeAction(...), $actions);
         $endpointTypes = array_map($this->describeEndpoint(...), $endpoints);
         $channelTypes = array_map($this->describeChannel(...), $channels);
+        $transferTypes = array_map($this->describeTransfer(...), $transfers);
 
         // Emitting a Data class can pull in others it references; keep going
         // until the set closes.
@@ -278,7 +288,7 @@ final class TypeScriptGenerator
         }
 
         return [
-            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes, $channelTypes),
+            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes, $channelTypes, $transferTypes),
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
             'queries' => self::renderQueryMap($queries),
@@ -685,8 +695,9 @@ final class TypeScriptGenerator
      * @param list<SharedTypes> $shared
      * @param list<array{map: string, table: string}> $endpoints
      * @param list<string> $channels each channel's line in the ChannelMap
+     * @param list<array{kind: string, map: string}> $transfers
      */
-    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = [], array $channels = []): string
+    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = [], array $channels = [], array $transfers = []): string
     {
         $out = $this->preamble('Source of truth: the PHP Data classes, #[Page] and #[Layout] routes, and #[Action] methods.');
 
@@ -710,6 +721,9 @@ final class TypeScriptGenerator
         }
         if ($channels !== []) {
             $imports .= \sprintf("import { channels } from %s;\n", self::literal(self::CHANNEL_RUNTIME, 'The channel runtime'));
+        }
+        if ($transfers !== []) {
+            $imports .= \sprintf("import { transfers } from %s;\n", self::literal(self::TRANSFER_RUNTIME, 'The transfer runtime'));
         }
         // From the package, not declared here: isRescued() narrows by it, and
         // two declarations of one shape are a drift waiting to happen.
@@ -747,6 +761,7 @@ final class TypeScriptGenerator
         $sections[] = $this->renderShared($shared);
         $sections[] = self::renderEndpoints($endpoints);
         $sections[] = self::renderChannels($channels);
+        $sections[] = self::renderTransfers($transfers);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
         // revalidatedRoutes, revalidatedTags and redirect, none of which the
@@ -1278,6 +1293,78 @@ final class TypeScriptGenerator
             . "export interface ChannelMap {\n" . implode('', $channels) . "}\n\n"
             . "/** Subscribes to a channel by name: `channel.listen('orders', { order }, (message) => ...)`, or useChannel(). */\n"
             . "export const channel = channels<ChannelMap>();\n";
+    }
+
+    /**
+     * One export's or import's line in its map: the arguments a start takes
+     * -- a model by its id -- and an export's formats or an import's
+     * columns.
+     *
+     * @return array{kind: string, map: string}
+     */
+    private function describeTransfer(CompiledTransfer $transfer): array
+    {
+        $where = "The {$transfer->kind} `{$transfer->name}`";
+        $class = new \ReflectionClass($transfer->class);
+
+        $args = [];
+        foreach ($class->getMethod('__invoke')->getParameters() as $parameter) {
+            $name = $parameter->getName();
+            if ($name === $transfer->rowParameter) {
+                continue;
+            }
+            $type = $parameter->getType();
+            $optional = $parameter->isDefaultValueAvailable() || isset($transfer->optionalModels[$name]);
+            $args[] = \sprintf(
+                '%s%s: %s',
+                self::key($name, "{$transfer->class}::\${$name}"),
+                $optional ? '?' : '',
+                isset($transfer->models[$name])
+                    ? ($type?->allowsNull() === true ? 'string | null' : 'string')
+                    : ($type === null ? 'unknown' : $this->types->map($type, null, $transfer->class, $class->getNamespaceName())),
+            );
+        }
+
+        $choices = $transfer->isExport() ? $transfer->formats : $transfer->columns;
+
+        return [
+            'kind' => $transfer->kind,
+            'map' => \sprintf(
+                "  %s: { args: %s; %s: %s };\n",
+                self::literal($transfer->name, $where),
+                $args === [] ? 'Record<string, never>' : '{ ' . implode('; ', $args) . ' }',
+                $transfer->isExport() ? 'formats' : 'columns',
+                implode(' | ', array_map(static fn (string $choice): string => self::literal($choice, $where), $choices)),
+            ),
+        ];
+    }
+
+    /**
+     * The ExportMap and ImportMap, and the `transfer` that starts what
+     * they describe, in the order of their names so a listing's order is no
+     * drift.
+     *
+     * @param list<array{kind: string, map: string}> $transfers
+     */
+    private static function renderTransfers(array $transfers): string
+    {
+        if ($transfers === []) {
+            return '';
+        }
+
+        $maps = [CompiledTransfer::EXPORT => [], CompiledTransfer::IMPORT => []];
+        foreach ($transfers as $transfer) {
+            $maps[$transfer['kind']][] = $transfer['map'];
+        }
+        sort($maps[CompiledTransfer::EXPORT]);
+        sort($maps[CompiledTransfer::IMPORT]);
+
+        return "/** The #[Export] classes, by name: the arguments a start takes, and the formats it writes. */\n"
+            . 'export interface ExportMap {' . ($maps[CompiledTransfer::EXPORT] === [] ? '' : "\n" . implode('', $maps[CompiledTransfer::EXPORT])) . "}\n\n"
+            . "/** The #[Import] classes, by name: the arguments a start takes, and the columns its file has. */\n"
+            . 'export interface ImportMap {' . ($maps[CompiledTransfer::IMPORT] === [] ? '' : "\n" . implode('', $maps[CompiledTransfer::IMPORT])) . "}\n\n"
+            . "/** Starts an export or an import by name: /_export or /_import, with the session's CSRF token. */\n"
+            . "export const transfer = transfers<ExportMap, ImportMap>();\n";
     }
 
     /** What a page or layout's loader returns, as a type: each class it may return, and null if it may. */
