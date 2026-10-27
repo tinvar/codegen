@@ -111,12 +111,18 @@ final class TestingFiles
         }
         sort($types);
 
+        // The runtime is imported for what importing it does: the build
+        // refuses a graph that reaches it (queryFunctions()), and it refuses
+        // to load outside a Vitest worker. Without it nothing here would
+        // stop a component importing a fake into a production page.
         $out = $this->preamble
             . "// Fakes of the PHP Data classes, for component tests. Every value is a placeholder made\n"
-            . "// from the field's name and type alone: never a database's, a seeder's or a secret.\n";
+            . "// from the field's name and type alone: never a database's, a seeder's or a secret.\n"
+            . "// The testing runtime is imported so that no build, and no process but a test, loads them.\n"
+            . "\nimport '@tinvar/react/testing';\n";
         if ($types !== []) {
             $out .= \sprintf(
-                "\nimport type { %s } from %s;\n",
+                "import type { %s } from %s;\n",
                 implode(', ', $types),
                 TypeScriptGenerator::literal(self::from($this->module, 1), 'The path of the module file'),
             );

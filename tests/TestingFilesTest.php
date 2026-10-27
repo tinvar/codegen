@@ -197,6 +197,15 @@ it('mocks each query module where tinvarTesting() looks for it', function () {
         );
 });
 
+// ADR 0061: queryFunctions() keeps the testing layer out of a build by the
+// runtime's specifier and marker. The mocks import it; the fakes import
+// nothing else that would, so without it a fake reached a production page.
+it('imports the testing runtime into every file, the fakes too, so no build can take one', function () {
+    foreach (testing() as $path => $source) {
+        expect($source)->toMatch("/^import (?:\\{ mock(?:Query|Action) \\} from )?'@tinvar\\/react\\/testing';$/m", $path);
+    }
+});
+
 it('refuses Data classes that need each other with no way to stop', function () {
     expect(fn () => new TypeScriptGenerator()->files([TfLoopA::class]))
         ->toThrow(CodegenException::class, 'TfLoopA -> TfLoopB -> TfLoopA');
