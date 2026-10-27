@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tinvar\Codegen;
 
 use Tinvar\Data\Data;
+use Tinvar\Data\ProvidesData;
+use Tinvar\Data\SharedRegistry;
 use Tinvar\Support\Lazy;
 use Tinvar\Data\Scroll;
 use Tinvar\Support\Str;
@@ -116,7 +118,10 @@ final class TypeMapper
         $mapped = $this->mapNamed($type->getName(), $docHint, $where);
 
         // `unknown` already includes null; PHP reports mixed as nullable.
-        return $type->allowsNull() && $mapped !== 'null' && $mapped !== 'unknown' ? "{$mapped} | null" : $mapped;
+        // A ProvidesData that may provide null is mapped with it already.
+        return $type->allowsNull() && $mapped !== 'null' && $mapped !== 'unknown' && !str_ends_with($mapped, ' | null')
+            ? "{$mapped} | null"
+            : $mapped;
     }
 
     private function mapNamed(string $name, ?string $docHint, string $where): string
@@ -137,9 +142,11 @@ final class TypeMapper
             // Reflection names a class in full; there is nothing to resolve.
             // Lazy by is_a(), so its name from before the split, an alias of
             // it, is read as Lazy too.
-            default => is_a($name, Lazy::class, true)
-                ? $this->mapLazy($docHint, $where)
-                : $this->mapClass($name, $where, qualified: true),
+            default => match (true) {
+                is_a($name, Lazy::class, true) => $this->mapLazy($docHint, $where),
+                is_subclass_of($name, ProvidesData::class) => $this->mapProvided($name, $where),
+                default => $this->mapClass($name, $where, qualified: true),
+            },
         };
     }
 
@@ -192,6 +199,28 @@ final class TypeMapper
     public function enums(): array
     {
         return $this->enums;
+    }
+
+    /**
+     * A ProvidesData field is sent as what its toData() returns: the
+     * encoder calls it where it meets the field (ADR 0060).
+     *
+     * @param class-string $class
+     */
+    private function mapProvided(string $class, string $where): string
+    {
+        try {
+            [$classes, $nullable] = SharedRegistry::provided($class);
+        } catch (\InvalidArgumentException $e) {
+            throw new CodegenException("Cannot map the ProvidesData at {$where}: {$e->getMessage()}", 0, $e);
+        }
+
+        $types = array_map(fn (string $data): string => $this->mapClass($data, $where, qualified: true), $classes);
+        if ($nullable) {
+            $types[] = 'null';
+        }
+
+        return implode(' | ', $types);
     }
 
     private function mapArray(?string $docHint, string $where): string
