@@ -207,11 +207,13 @@ final class TypeScriptGenerator
             }
         }
 
-        // And so is each shared key's.
+        // And so is each shared key's. A once key crosses as a once field
+        // (ADR 0065), so the module needs the type for it.
         foreach ($shared as $key) {
             foreach ($key->dataClasses as $class) {
                 $this->emitData($class);
             }
+            $this->onces = $this->onces || $key->once;
         }
 
         // Described before the set of Data classes closes: a query's result
@@ -952,7 +954,9 @@ final class TypeScriptGenerator
      * The shared keys, typed: an augmentation of the runtime's
      * SharedDataMap, so `shared('customer')` from it is a CustomerData or
      * null, and a key nobody shares is a type error. Only a module can
-     * augment one, which this file is: it exports the interfaces.
+     * augment one, which this file is: it exports the interfaces. A once
+     * key is a OnceField of its value, which a view can only render through
+     * <Once>: when the browser holds it, there is no value to read (ADR 0065).
      *
      * @param list<SharedTypes> $shared
      */
@@ -971,7 +975,8 @@ final class TypeScriptGenerator
             if ($key->nullable) {
                 $types[] = 'null';
             }
-            $out .= \sprintf("    %s: %s;\n", self::key($key->key, $where), implode(' | ', $types));
+            $type = implode(' | ', $types);
+            $out .= \sprintf("    %s: %s;\n", self::key($key->key, $where), $key->once ? "OnceField<{$type}>" : $type);
         }
 
         return $out . "  }\n}\n";

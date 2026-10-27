@@ -20,6 +20,8 @@ final readonly class SharedTypes
         public string $key,
         public array $dataClasses,
         public bool $nullable,
+        // #[Shared(once: true)]: sent as a once field, and typed as one (ADR 0065).
+        public bool $once = false,
     ) {}
 
     /** @return list<self> every key the registry has, by name */
@@ -31,7 +33,7 @@ final readonly class SharedTypes
         return array_map(static function (string $key) use ($registry): self {
             [$classes, $nullable] = $registry->typesOf($key);
 
-            return new self($key, $classes, $nullable);
+            return new self($key, $classes, $nullable, $registry->onceOf($key) !== null);
         }, $keys);
     }
 }

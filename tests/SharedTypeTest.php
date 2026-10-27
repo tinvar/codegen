@@ -21,6 +21,7 @@ use Tinvar\Tests\Data\Fixtures\Shared\SiteShared;
 require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
 require_once __DIR__ . '/../../framework/tests/Query/Fixtures/queries.php';
 require_once __DIR__ . '/../../framework/tests/Data/Fixtures/shared.php';
+require_once __DIR__ . '/../../framework/tests/Data/Fixtures/shared-once.php';
 
 const ROOT = __DIR__ . '/../../..';
 const TSC = ROOT . '/node_modules/.bin/tsc';
@@ -88,6 +89,18 @@ it('declares each key in an augmentation of the runtime\'s SharedDataMap, by nam
 
 it('types a ProvidesData field as what it provides', function () {
     expect(module())->toContain("export interface PageWithGreetingData {\n  greeting: GreetingData;\n}");
+});
+
+it('types a once key as a once field of its value, and imports the type for it', function () {
+    $module = (new TypeScriptGenerator())->files(
+        [],
+        shared: SharedTypes::of(new SharedRegistry([\Tinvar\Tests\Data\Fixtures\Shared\OnceShared::class])),
+    )['module'];
+
+    expect($module)->toContain("import type { OnceField } from '@tinvar/react/once';")
+        ->toContain("    motd: OnceField<GreetingData>;\n")
+        ->toContain("    pinned: OnceField<GreetingData | null>;\n")
+        ->toContain("    plain: GreetingData;\n");
 });
 
 it('emits no augmentation when nothing is shared', function () {
