@@ -1352,17 +1352,22 @@ final class TypeScriptGenerator
             return '';
         }
 
-        $maps = [CompiledTransfer::EXPORT => [], CompiledTransfer::IMPORT => []];
+        $exports = [];
+        $imports = [];
         foreach ($transfers as $transfer) {
-            $maps[$transfer['kind']][] = $transfer['map'];
+            if ($transfer['kind'] === CompiledTransfer::EXPORT) {
+                $exports[] = $transfer['map'];
+            } else {
+                $imports[] = $transfer['map'];
+            }
         }
-        sort($maps[CompiledTransfer::EXPORT]);
-        sort($maps[CompiledTransfer::IMPORT]);
+        sort($exports);
+        sort($imports);
 
         return "/** The #[Export] classes, by name: the arguments a start takes, and the formats it writes. */\n"
-            . 'export interface ExportMap {' . ($maps[CompiledTransfer::EXPORT] === [] ? '' : "\n" . implode('', $maps[CompiledTransfer::EXPORT])) . "}\n\n"
+            . 'export interface ExportMap {' . ($exports === [] ? '' : "\n" . implode('', $exports)) . "}\n\n"
             . "/** The #[Import] classes, by name: the arguments a start takes, and the columns its file has. */\n"
-            . 'export interface ImportMap {' . ($maps[CompiledTransfer::IMPORT] === [] ? '' : "\n" . implode('', $maps[CompiledTransfer::IMPORT])) . "}\n\n"
+            . 'export interface ImportMap {' . ($imports === [] ? '' : "\n" . implode('', $imports)) . "}\n\n"
             . "/** Starts an export or an import by name: /_export or /_import, with the session's CSRF token. */\n"
             . "export const transfer = transfers<ExportMap, ImportMap>();\n";
     }
