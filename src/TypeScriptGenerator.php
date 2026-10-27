@@ -74,6 +74,9 @@ final class TypeScriptGenerator
     /** @var array<string, string> class => emitted interface body */
     private array $interfaces = [];
 
+    /** @var array<string, list<array{name: string, type: string}>> class => its fields, as emitted; for the fakes */
+    private array $fields = [];
+
     /** Whether any emitted field is #[Rescue], so the module needs the Rescued type. */
     private bool $rescues = false;
 
@@ -143,6 +146,10 @@ final class TypeScriptGenerator
      *            functions on its route's query allowlist (tinvar-spec.md,
      *            "Renderer hardening"); the name cannot be read back from the
      *            function's, since `racks.UnitLoad` is typed as `unitLoad()`.
+     *   testing  For a `testing/` directory beside the others: a fake of each
+     *            Data interface, and a mock of each `@queries/*` and
+     *            `@actions/*` module, for component tests (TestingFiles,
+     *            ADR 0061). Paths are relative to that directory.
      *
      * Actions are modules of their own, not ambient declarations as queries
      * are: a query is called by a server component through the render's
@@ -165,7 +172,7 @@ final class TypeScriptGenerator
      * @param list<CompiledAction>     $actions
      * @param list<class-string>       $fieldEnums
      * @param list<SharedTypes>        $shared
-     * @return array{module: string, ambient: string, actions: array<string, string>, queries: string}
+     * @return array{module: string, ambient: string, actions: array<string, string>, queries: string, testing: array<string, string>}
      */
     public function files(
         array $dataClasses,
@@ -176,6 +183,7 @@ final class TypeScriptGenerator
         array $shared = [],
     ): array {
         $this->interfaces = [];
+        $this->fields = [];
         $this->rescues = false;
         $this->types = new TypeMapper();
 
@@ -247,7 +255,35 @@ final class TypeScriptGenerator
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
             'queries' => self::renderQueryMap($queries),
+            'testing' => $this->renderTesting($queries, $described, $actions !== []),
         ];
+    }
+
+    /**
+     * The fakes and mocks, from the same interfaces, queries and actions the
+     * other files describe -- so a mock cannot drift from the module it
+     * stands in for, and `codegen --check` holds them to the PHP too.
+     *
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
+     * @param list<array{file: string, class: string, method: string, name: string, args: string, declaration: string}> $actions
+     * @return array<string, string>
+     */
+    private function renderTesting(array $queries, array $actions, bool $hasActions): array
+    {
+        $names = $this->types->registered();
+        $interfaces = [];
+        foreach ($this->fields as $class => $fields) {
+            $interfaces[$names[$class]] = $fields;
+        }
+        ksort($interfaces);
+
+        $enums = [];
+        foreach ($this->types->enums() as $enum => $name) {
+            $first = $enum::cases()[0] ?? null;
+            $enums[$name] = $first instanceof \BackedEnum ? self::literal((string) $first->value, "{$enum}::{$first->name}") : null;
+        }
+
+        return new TestingFiles($interfaces, $enums, $this->module, $this->preamble(''))->files($queries, $actions, $hasActions);
     }
 
     /**
@@ -307,6 +343,7 @@ final class TypeScriptGenerator
         $merged = DataShape::merged($class);
         $optional = DataShape::optional($class);
         $lines = [];
+        $fields = [];
 
         foreach (DataShape::fieldsOf($class) as $property) {
             $field = $property->getName();
@@ -369,7 +406,9 @@ final class TypeScriptGenerator
             }
 
             $lines[] = sprintf('  %s: %s;', self::key($field, $where), $mapped);
+            $fields[] = ['name' => $field, 'type' => $mapped];
         }
+        $this->fields[$class] = $fields;
 
         $this->interfaces[$class] = sprintf(
             "export interface %s {\n%s\n}\n",
@@ -494,7 +533,7 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @return array{file: string, class: string, declaration: string}
+     * @return array{file: string, class: string, method: string, name: string, args: string, declaration: string}
      */
     private function describeAction(CompiledAction $action): array
     {
@@ -524,13 +563,18 @@ final class TypeScriptGenerator
         $module = self::module('@actions/' . Str::shortName($action->class), "The actions of {$action->class}");
         $file = self::identifier(substr($module, \strlen('@actions/')), "The actions of {$action->class}");
 
+        $method = self::identifier($action->method, "{$action->class}::{$action->method}()");
+
         return [
             'file' => $file,
             'class' => $action->class,
+            'method' => $method,
+            'name' => $action->name,
+            'args' => implode('; ', $arguments),
             'declaration' => \sprintf(
                 "/** Posts to the PHP action `%s`. */\nexport const %s = action<{ %s }, ActionResult>(%s);\n",
                 self::comment($action->name),
-                self::identifier($action->method, "{$action->class}::{$action->method}()"),
+                $method,
                 implode('; ', $arguments),
                 self::literal($action->name, $where),
             ),
@@ -541,7 +585,7 @@ final class TypeScriptGenerator
      * One module per class: its action references, and the types they name
      * from the module file.
      *
-     * @param list<array{file: string, class: string, declaration: string}> $actions
+     * @param list<array{file: string, class: string, method: string, name: string, args: string, declaration: string}> $actions
      * @return array<string, string> file name, without extension => source
      */
     private function renderActions(array $actions): array
@@ -589,7 +633,7 @@ final class TypeScriptGenerator
     {
         $out = $this->header === '' ? '' : $this->header . "\n";
 
-        return $out . "// Generated by tinvar codegen. Do not edit.\n// {$about}\n";
+        return $out . "// Generated by tinvar codegen. Do not edit.\n" . ($about === '' ? '' : "// {$about}\n");
     }
 
     /**
@@ -954,7 +998,7 @@ final class TypeScriptGenerator
      * of its own into every consumer's types. A line terminator cannot stand
      * in a string literal at all, U+2028 and U+2029 included.
      */
-    private static function literal(string $value, string $where): string
+    public static function literal(string $value, string $where): string
     {
         $escaped = preg_replace_callback(
             '/[\\\\\'\x00-\x1f\x7f\x{2028}\x{2029}]/u',
@@ -979,7 +1023,7 @@ final class TypeScriptGenerator
      * Text placed inside a block comment: it cannot end the comment, and it
      * stays on the comment's line.
      */
-    private static function comment(string $text): string
+    public static function comment(string $text): string
     {
         return str_replace(
             ['*/', "\r\n", "\r", "\n", "\u{2028}", "\u{2029}"],
@@ -1015,7 +1059,7 @@ final class TypeScriptGenerator
      * parameter names are in practice, and quoted otherwise. A query's
      * argument names are attribute keys, which can hold anything.
      */
-    private static function key(string $name, string $where): string
+    public static function key(string $name, string $where): string
     {
         return preg_match(self::IDENTIFIER, $name) === 1 ? $name : self::literal($name, $where);
     }
