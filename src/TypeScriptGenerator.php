@@ -11,6 +11,7 @@ use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
 use Tinvar\Data\DataFields;
 use Tinvar\Data\DataShape;
+use Tinvar\Endpoints\CompiledEndpoint;
 use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
 use Tinvar\Routing\RouteKind;
@@ -53,6 +54,9 @@ final class TypeScriptGenerator
 
     /** The module whose `shared()` the generated SharedDataMap types (ADR 0060). */
     public const SHARED_RUNTIME = '@tinvar/react/server';
+
+    /** Where the generated `endpoint` gets its runtime (ADR 0067). */
+    public const ENDPOINT_RUNTIME = '@tinvar/react/endpoint';
 
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
@@ -110,6 +114,7 @@ final class TypeScriptGenerator
      * @param list<CompiledAction>     $actions
      * @param list<class-string>       $fieldEnums
      * @param list<SharedTypes>        $shared
+     * @param list<CompiledEndpoint>   $endpoints
      */
     public function generate(
         array $dataClasses,
@@ -118,8 +123,9 @@ final class TypeScriptGenerator
         array $actions = [],
         array $fieldEnums = [],
         array $shared = [],
+        array $endpoints = [],
     ): string {
-        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared)['module'];
+        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared, $endpoints)['module'];
     }
 
     /**
@@ -175,6 +181,9 @@ final class TypeScriptGenerator
      * @param list<CompiledAction>     $actions
      * @param list<class-string>       $fieldEnums
      * @param list<SharedTypes>        $shared
+     * @param list<CompiledEndpoint>   $endpoints the #[Get], #[Post] and #[Endpoint] routes: an
+     *                                            EndpointMap in the module, and an `endpoint` built on
+     *                                            ENDPOINT_RUNTIME that builds their URLs and calls them
      * @return array{module: string, ambient: string, actions: array<string, string>, queries: string, testing: array<string, string>}
      */
     public function files(
@@ -184,6 +193,7 @@ final class TypeScriptGenerator
         array $actions = [],
         array $fieldEnums = [],
         array $shared = [],
+        array $endpoints = [],
     ): array {
         $this->interfaces = [];
         $this->fields = [];
@@ -220,6 +230,7 @@ final class TypeScriptGenerator
         // and an action's form-request fields can name Data classes too.
         $queries = array_map($this->describeQuery(...), $queryClasses);
         $described = array_map($this->describeAction(...), $actions);
+        $endpointTypes = array_map($this->describeEndpoint(...), $endpoints);
 
         // Emitting a Data class can pull in others it references; keep going
         // until the set closes.
@@ -256,7 +267,7 @@ final class TypeScriptGenerator
         }
 
         return [
-            'module' => $this->renderModule($routes, $actions !== [], $shared),
+            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes),
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
             'queries' => self::renderQueryMap($queries),
@@ -661,8 +672,9 @@ final class TypeScriptGenerator
     /**
      * @param list<RouteTypes>  $routes
      * @param list<SharedTypes> $shared
+     * @param list<array{map: string, table: string}> $endpoints
      */
-    private function renderModule(array $routes, bool $hasActions, array $shared = []): string
+    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = []): string
     {
         $out = $this->preamble('Source of truth: the PHP Data classes, #[Page] and #[Layout] routes, and #[Action] methods.');
 
@@ -680,6 +692,9 @@ final class TypeScriptGenerator
         }
         if ($hasNamed) {
             $imports .= \sprintf("import { routes } from %s;\n", self::literal(self::ROUTE_RUNTIME, 'The route runtime'));
+        }
+        if ($endpoints !== []) {
+            $imports .= \sprintf("import { endpoints } from %s;\n", self::literal(self::ENDPOINT_RUNTIME, 'The endpoint runtime'));
         }
         // From the package, not declared here: isRescued() narrows by it, and
         // two declarations of one shape are a drift waiting to happen.
@@ -715,6 +730,7 @@ final class TypeScriptGenerator
         $sections = [...array_values($interfaces), ...$this->renderEnums()];
         $sections[] = $this->renderRoutes($routes);
         $sections[] = $this->renderShared($shared);
+        $sections[] = self::renderEndpoints($endpoints);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
         // revalidatedRoutes, revalidatedTags and redirect, none of which the
@@ -1101,6 +1117,84 @@ final class TypeScriptGenerator
         }
 
         return $module;
+    }
+
+    /**
+     * One endpoint's line in the EndpointMap -- its path parameters, its
+     * form requests' fields as its input, and what it answers with -- and
+     * its line in the table the runtime calls it from.
+     *
+     * @return array{map: string, table: string}
+     */
+    private function describeEndpoint(CompiledEndpoint $endpoint): array
+    {
+        $where = "The endpoint `{$endpoint->name}`";
+
+        $input = [];
+        foreach ($endpoint->formRequests as $class) {
+            foreach (DataShape::fieldsOf($class) as $field) {
+                $type = $field->getType();
+                $input[] = \sprintf(
+                    '%s: %s',
+                    self::key($field->getName(), "{$class}::\${$field->getName()}"),
+                    // A model field crosses as its id.
+                    $type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), Model::class)
+                        ? ($type->allowsNull() ? 'string | null' : 'string')
+                        : ($type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName())),
+                );
+            }
+        }
+
+        $data = $endpoint->data;
+        $returns = match (true) {
+            $data !== null => $this->types->register($data),
+            $endpoint->returns === CompiledEndpoint::RETURNS_RESPONSE => 'Response',
+            default => 'undefined',
+        };
+        $runtime = match ($endpoint->returns) {
+            CompiledEndpoint::RETURNS_DATA => 'data',
+            CompiledEndpoint::RETURNS_RESPONSE => 'response',
+            default => 'nothing',
+        };
+
+        $name = self::literal($endpoint->name, $where);
+
+        return [
+            'map' => \sprintf(
+                "  %s: { params: %s; input: %s; returns: %s };\n",
+                $name,
+                self::paramsType($endpoint->parameters),
+                $input === [] ? 'Record<string, never>' : '{ ' . implode('; ', $input) . ' }',
+                $returns,
+            ),
+            'table' => \sprintf(
+                "  %s: { methods: [%s], segments: [%s], returns: %s },\n",
+                $name,
+                implode(', ', array_map(static fn (string $m): string => self::literal($m, $where), $endpoint->methods)),
+                implode(', ', array_map(static fn (string $s): string => self::literal($s, "A segment of {$where}"), $endpoint->segments)),
+                self::literal($runtime, $where),
+            ),
+        ];
+    }
+
+    /**
+     * The EndpointMap and the `endpoint` that calls what it describes,
+     * by name, in the order of their names so a listing's order is no drift.
+     *
+     * @param list<array{map: string, table: string}> $endpoints
+     */
+    private static function renderEndpoints(array $endpoints): string
+    {
+        if ($endpoints === []) {
+            return '';
+        }
+
+        usort($endpoints, static fn (array $a, array $b): int => strcmp($a['map'], $b['map']));
+
+        return "/** The #[Get], #[Post] and #[Endpoint] routes, by name: their path parameters, their input, and what they answer with. */\n"
+            . "export interface EndpointMap {\n" . implode('', array_column($endpoints, 'map')) . "}\n\n"
+            . "/** Builds an endpoint's URL, or calls it: its Data parsed, nothing for a void one, the Response for one that returns a Response. */\n"
+            . "export const endpoint = endpoints<EndpointMap>({\n" . implode('', array_column($endpoints, 'table')) . "});\n";
     }
 
     /** What a page or layout's loader returns, as a type: each class it may return, and null if it may. */
