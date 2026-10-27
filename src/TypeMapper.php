@@ -31,6 +31,9 @@ final class TypeMapper
     /** Whether a Scroll has been mapped; see mappedScroll(). */
     private bool $scrolls = false;
 
+    /** @var array<class-string<\BackedEnum>, string> string-backed enum => emitted type name */
+    private array $enums = [];
+
     /** @param class-string $class */
     public function register(string $class): string
     {
@@ -42,7 +45,7 @@ final class TypeMapper
         // share one became two `export interface X` blocks with different
         // bodies -- a TypeScript merge of both, describing neither.
         $short = Str::shortName($class);
-        $clash = array_search($short, $this->names, true);
+        $clash = array_search($short, [...$this->names, ...$this->enums], true);
         if ($clash !== false) {
             throw new CodegenException(
                 "{$class} and {$clash} would both be emitted as `{$short}`. Rename one of them.",
@@ -119,7 +122,7 @@ final class TypeMapper
     private function mapNamed(string $name, ?string $docHint, string $where): string
     {
         return match ($name) {
-            'string' => 'string',
+            'string' => $this->mapString($docHint, $where),
             'int', 'float' => 'number',
             'bool' => 'boolean',
             // `string|false`, and true and false on their own (PHP 8.2), are
@@ -138,6 +141,57 @@ final class TypeMapper
                 ? $this->mapLazy($docHint, $where)
                 : $this->mapClass($name, $where, qualified: true),
         };
+    }
+
+    /**
+     * A string, or -- typed `value-of<CatalogSort>` in its docblock, as
+     * PHPStan reads it too -- one of a string-backed enum's values: the
+     * union of them, emitted under the enum's name (enums()). So a sort
+     * field the server reads into CatalogSort is the same closed set on the
+     * client, and a value the server would refuse does not type-check.
+     */
+    private function mapString(?string $docHint, string $where): string
+    {
+        $hint = $docHint === null ? '' : trim((string) preg_replace('/\|\s*null\b|\bnull\s*\|/', '', $docHint));
+        if (preg_match('/^value-of<\s*([\\\\A-Za-z_][\\\\A-Za-z0-9_]*)\s*>$/', $hint, $m) !== 1) {
+            return 'string';
+        }
+
+        $enum = $this->resolve($m[1]) ?? $m[1];
+        if (!enum_exists($enum) && enum_exists($m[1])) {
+            $enum = $m[1];
+        }
+
+        return $this->registerEnum($enum, $where);
+    }
+
+    /**
+     * A string-backed enum, emitted as the union of its values under its
+     * short name: a sort or filter field's set (#[FieldsOf]), or any other
+     * a Data field names with value-of<>.
+     */
+    public function registerEnum(string $enum, string $where): string
+    {
+        if (isset($this->enums[$enum])) {
+            return $this->enums[$enum];
+        }
+        if (!is_subclass_of($enum, \BackedEnum::class) || (string) (new \ReflectionEnum($enum))->getBackingType() !== 'string') {
+            throw new CodegenException("{$where} names value-of<{$enum}>, and only a string-backed enum's values are emitted.");
+        }
+
+        $short = Str::shortName($enum);
+        $clash = array_search($short, [...$this->names, ...$this->enums], true);
+        if ($clash !== false) {
+            throw new CodegenException("{$enum} and {$clash} would both be emitted as `{$short}`. Rename one of them.");
+        }
+
+        return $this->enums[$enum] = $short;
+    }
+
+    /** @return array<class-string<\BackedEnum>, string> each enum a field names, by the name it is emitted as */
+    public function enums(): array
+    {
+        return $this->enums;
     }
 
     private function mapArray(?string $docHint, string $where): string

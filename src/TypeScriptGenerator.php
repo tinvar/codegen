@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tinvar\Codegen;
 
 use Tinvar\Actions\CompiledAction;
+use Tinvar\Attributes\FieldsOf;
 use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
+use Tinvar\Data\DataFields;
 use Tinvar\Data\DataShape;
 use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
@@ -99,14 +101,16 @@ final class TypeScriptGenerator
      * @param list<class-string>       $queryClasses
      * @param list<RouteTypes>         $routes
      * @param list<CompiledAction>     $actions
+     * @param list<class-string>       $fieldEnums
      */
     public function generate(
         array $dataClasses,
         array $queryClasses = [],
         array $routes = [],
         array $actions = [],
+        array $fieldEnums = [],
     ): string {
-        return $this->files($dataClasses, $queryClasses, $routes, $actions)['module'];
+        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums)['module'];
     }
 
     /**
@@ -139,10 +143,19 @@ final class TypeScriptGenerator
      * declarations it once had described functions nothing defined, so the
      * first import of one failed the build.
      *
+     * The module also holds each sort and filter field enum: a
+     * string-backed enum marked #[FieldsOf] in $fieldEnums, and any
+     * string-backed enum a Data field is typed with as `value-of<...>`, as
+     * a union type of its values and a constant listing them, under the
+     * enum's name -- the same closed set the server reads a request into.
+     * A #[FieldsOf] enum is held to its Data class first (DataFields), so
+     * one naming a field the class does not show fails the build here too.
+     *
      * @param list<class-string<Data>> $dataClasses
      * @param list<class-string>       $queryClasses
      * @param list<RouteTypes>         $routes
      * @param list<CompiledAction>     $actions
+     * @param list<class-string>       $fieldEnums
      * @return array{module: string, ambient: string, actions: array<string, string>, queries: string}
      */
     public function files(
@@ -150,11 +163,18 @@ final class TypeScriptGenerator
         array $queryClasses = [],
         array $routes = [],
         array $actions = [],
+        array $fieldEnums = [],
     ): array {
         $this->interfaces = [];
         $this->rescues = false;
         $this->types = new TypeMapper();
 
+        foreach ($fieldEnums as $enum) {
+            if (!enum_exists($enum) || (new \ReflectionEnum($enum))->getAttributes(FieldsOf::class) === []) {
+                throw new CodegenException("{$enum} is listed as a sort or filter field enum, and has no #[FieldsOf].");
+            }
+            $this->types->registerEnum($enum, $enum);
+        }
         foreach ($dataClasses as $class) {
             $this->emitData($class);
         }
@@ -606,7 +626,7 @@ final class TypeScriptGenerator
         $names = $this->types->registered();
         $interfaces = $this->interfaces;
         uksort($interfaces, static fn (string $a, string $b): int => strcmp($names[$a] ?? $a, $names[$b] ?? $b));
-        $sections = array_values($interfaces);
+        $sections = [...array_values($interfaces), ...$this->renderEnums()];
         $sections[] = $this->renderRoutes($routes);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
@@ -630,6 +650,48 @@ final class TypeScriptGenerator
             static fn (string $section): string => rtrim($section, "\n") . "\n",
             array_filter($sections, static fn (string $section): bool => $section !== ''),
         ));
+    }
+
+    /**
+     * Each enum a field is typed with, by name: the union of its values, and
+     * a constant listing them in the order the enum declares them, for a
+     * component to offer -- a type and a value may share a name.
+     *
+     * @return list<string>
+     */
+    private function renderEnums(): array
+    {
+        $enums = $this->types->enums();
+        asort($enums);
+
+        $sections = [];
+        foreach ($enums as $enum => $name) {
+            $name = self::identifier($name, $enum);
+
+            // Held to its Data class, as `tinvar check` and DataFields::pick()
+            // hold it: a case naming a field the class does not show would
+            // put on the client a sort the server refuses -- or one it
+            // should never have taken.
+            $about = "The values of {$enum}.";
+            $fieldsOf = (new \ReflectionEnum($enum))->getAttributes(FieldsOf::class)[0] ?? null;
+            if ($fieldsOf !== null) {
+                $problems = DataFields::problemsWith($enum);
+                if ($problems !== []) {
+                    throw new CodegenException(implode(' ', $problems));
+                }
+                $about = 'The fields of ' . Str::shortName($fieldsOf->newInstance()->data) . " a request may name, as {$enum} reads them (#[FieldsOf]).";
+            }
+
+            $values = array_map(
+                static fn (\BackedEnum $case): string => self::literal((string) $case->value, "{$enum}::{$case->name}"),
+                $enum::cases(),
+            );
+            $sections[] = '/** ' . self::comment($about) . " */\n"
+                . "export type {$name} = " . ($values === [] ? 'never' : implode(' | ', $values)) . ";\n"
+                . "export const {$name}: readonly {$name}[] = [" . implode(', ', $values) . "];\n";
+        }
+
+        return $sections;
     }
 
     /**
