@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Codegen;
 
 use Tinvar\Actions\CompiledAction;
+use Tinvar\Attributes\Authorize;
 use Tinvar\Attributes\FieldsOf;
 use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
@@ -146,6 +147,8 @@ final class TypeScriptGenerator
      *            functions on its route's query allowlist (tinvar-spec.md,
      *            "Renderer hardening"); the name cannot be read back from the
      *            function's, since `racks.UnitLoad` is typed as `unitLoad()`.
+     *            And each query's own #[Authorize] abilities, which the
+     *            lint holds a query called inside a can() branch to.
      *   testing  For a `testing/` directory beside the others: a fake of each
      *            Data interface, and a mock of each `@queries/*` and
      *            `@actions/*` module, for component tests (TestingFiles,
@@ -264,7 +267,7 @@ final class TypeScriptGenerator
      * other files describe -- so a mock cannot drift from the module it
      * stands in for, and `codegen --check` holds them to the PHP too.
      *
-     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string, authorize: list<string>}> $queries
      * @param list<array{file: string, class: string, method: string, name: string, args: string, declaration: string}> $actions
      * @return array<string, string>
      */
@@ -294,11 +297,12 @@ final class TypeScriptGenerator
      * refused: the declaration file would describe one function twice, and
      * this map could say only one of the queries it calls.
      *
-     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string, authorize: list<string>}> $queries
      */
     private static function renderQueryMap(array $queries): string
     {
         $modules = [];
+        $authorize = [];
         foreach ($queries as $query) {
             $taken = $modules[$query['module']][$query['function']] ?? null;
             if ($taken !== null && $taken !== $query['name']) {
@@ -307,15 +311,21 @@ final class TypeScriptGenerator
                 );
             }
             $modules[$query['module']][$query['function']] = $query['name'];
+            $authorize[$query['name']] = $query['authorize'];
         }
         ksort($modules);
         foreach ($modules as &$functions) {
             ksort($functions);
         }
         unset($functions);
+        ksort($authorize);
 
         return json_encode(
-            ['format' => 1, 'modules' => $modules === [] ? new \stdClass() : $modules],
+            [
+                'format' => 1,
+                'modules' => $modules === [] ? new \stdClass() : $modules,
+                'authorize' => $authorize === [] ? new \stdClass() : $authorize,
+            ],
             JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
         ) . "\n";
     }
@@ -419,7 +429,7 @@ final class TypeScriptGenerator
 
     /**
      * @param class-string $class
-     * @return array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}
+     * @return array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string, authorize: list<string>}
      */
     private function describeQuery(string $class): array
     {
@@ -461,12 +471,22 @@ final class TypeScriptGenerator
 
         $returns = $this->returnTypeOf($reflection, $class);
 
+        // The abilities its own checks name, read as the registry reads
+        // them: the lint holds a query called inside a can() branch to one
+        // of the same ability (tinvar-spec.md, "Defaults and build rules").
+        $abilities = array_values(array_unique(array_map(
+            static fn (Authorize $check): string => $check->ability,
+            Authorize::declaredOn($class, QueryAttribute::entryMethodOf($class)),
+        )));
+        sort($abilities);
+
         return [
             'name' => $wireName,
             'module' => self::module(self::moduleFor($wireName), "The query `{$wireName}` ({$class})"),
             'function' => self::identifier(self::functionName($wireName), "The query `{$wireName}` ({$class})"),
             'args' => $args,
             'returns' => $returns,
+            'authorize' => $abilities,
         ];
     }
 
@@ -760,7 +780,7 @@ final class TypeScriptGenerator
     }
 
     /**
-     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string}> $queries
+     * @param list<array{name: string, module: string, function: string, args: list<array{name: string, type: string, optional?: bool}>, returns: string, authorize: list<string>}> $queries
      */
     private function renderAmbient(array $queries): string
     {

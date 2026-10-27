@@ -11,8 +11,13 @@ namespace Tinvar\Tests\Codegen\QueryMap;
  * on its route's query allowlist (tinvar-spec.md, "Renderer hardening"). It
  * cannot read the query back from the function: `racks.UnitLoad` is typed
  * as `unitLoad()`, and so would `racks.unitLoad` be.
+ *
+ * And the abilities each query's own #[Authorize] checks, which the lint
+ * holds a query called inside a can() branch to ("Defaults and build
+ * rules").
  */
 
+use Tinvar\Attributes\Authorize;
 use Tinvar\Attributes\Query;
 use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\TypeScriptGenerator;
@@ -39,21 +44,41 @@ final class LowerCaseUnitLoad
     }
 }
 
-it('names the query each function calls, by module', function () {
-    $files = new TypeScriptGenerator()->files([], [F\FindSite::class, F\Ping::class, F\SiteStats::class, UpperCaseUnitLoad::class]);
+#[Query(name: 'racks.audit'), Authorize('view', 'rack')]
+final class RackAudit
+{
+    #[Authorize('audit', 'rack'), Authorize('view', 'rack')]
+    public function __invoke(F\CgSite $rack): string
+    {
+        return '';
+    }
+}
+
+it('names the query each function calls, by module, and the abilities each checks', function () {
+    $files = new TypeScriptGenerator()->files([], [F\FindSite::class, F\Ping::class, F\SiteStats::class, UpperCaseUnitLoad::class, RackAudit::class]);
 
     expect(json_decode($files['queries'], true, 8, JSON_THROW_ON_ERROR))->toBe([
         'format' => 1,
         'modules' => [
             '@queries' => ['ping' => 'ping'],
-            '@queries/racks' => ['unitLoad' => 'racks.UnitLoad'],
+            '@queries/racks' => ['audit' => 'racks.audit', 'unitLoad' => 'racks.UnitLoad'],
             '@queries/sites' => ['find' => 'sites.find', 'stats' => 'sites.stats'],
+        ],
+        // The class's checks and the method's, each ability once; a query
+        // declaring none is listed with none, not left out.
+        'authorize' => [
+            'ping' => [],
+            'racks.UnitLoad' => [],
+            'racks.audit' => ['audit', 'view'],
+            'sites.find' => [],
+            'sites.stats' => [],
         ],
     ]);
 });
 
-it('writes an empty map, as an object, for an app with no queries', function () {
-    expect(new TypeScriptGenerator()->files([])['queries'])->toBe("{\n    \"format\": 1,\n    \"modules\": {}\n}\n");
+it('writes empty maps, as objects, for an app with no queries', function () {
+    expect(new TypeScriptGenerator()->files([])['queries'])
+        ->toBe("{\n    \"format\": 1,\n    \"modules\": {},\n    \"authorize\": {}\n}\n");
 });
 
 // One function in the types, two queries behind it: the map could name only
