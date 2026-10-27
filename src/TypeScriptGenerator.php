@@ -11,6 +11,7 @@ use Tinvar\Attributes\Query as QueryAttribute;
 use Tinvar\Data\Data;
 use Tinvar\Data\DataFields;
 use Tinvar\Data\DataShape;
+use Tinvar\Channels\CompiledChannel;
 use Tinvar\Endpoints\CompiledEndpoint;
 use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
@@ -57,6 +58,9 @@ final class TypeScriptGenerator
 
     /** Where the generated `endpoint` gets its runtime (ADR 0067). */
     public const ENDPOINT_RUNTIME = '@tinvar/react/endpoint';
+
+    /** Where the generated `channel` gets its runtime (ADR 0069). */
+    public const CHANNEL_RUNTIME = '@tinvar/react/channel';
 
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
@@ -115,6 +119,7 @@ final class TypeScriptGenerator
      * @param list<class-string>       $fieldEnums
      * @param list<SharedTypes>        $shared
      * @param list<CompiledEndpoint>   $endpoints
+     * @param list<CompiledChannel>    $channels
      */
     public function generate(
         array $dataClasses,
@@ -124,8 +129,9 @@ final class TypeScriptGenerator
         array $fieldEnums = [],
         array $shared = [],
         array $endpoints = [],
+        array $channels = [],
     ): string {
-        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared, $endpoints)['module'];
+        return $this->files($dataClasses, $queryClasses, $routes, $actions, $fieldEnums, $shared, $endpoints, $channels)['module'];
     }
 
     /**
@@ -184,6 +190,9 @@ final class TypeScriptGenerator
      * @param list<CompiledEndpoint>   $endpoints the #[Get], #[Post] and #[Endpoint] routes: an
      *                                            EndpointMap in the module, and an `endpoint` built on
      *                                            ENDPOINT_RUNTIME that builds their URLs and calls them
+     * @param list<CompiledChannel>    $channels  the #[Channel]s: a ChannelMap in the module -- each
+     *                                            one's parameters and message -- and a `channel`
+     *                                            built on CHANNEL_RUNTIME that subscribes to them
      * @return array{module: string, ambient: string, actions: array<string, string>, queries: string, testing: array<string, string>}
      */
     public function files(
@@ -194,6 +203,7 @@ final class TypeScriptGenerator
         array $fieldEnums = [],
         array $shared = [],
         array $endpoints = [],
+        array $channels = [],
     ): array {
         $this->interfaces = [];
         $this->fields = [];
@@ -231,6 +241,7 @@ final class TypeScriptGenerator
         $queries = array_map($this->describeQuery(...), $queryClasses);
         $described = array_map($this->describeAction(...), $actions);
         $endpointTypes = array_map($this->describeEndpoint(...), $endpoints);
+        $channelTypes = array_map($this->describeChannel(...), $channels);
 
         // Emitting a Data class can pull in others it references; keep going
         // until the set closes.
@@ -267,7 +278,7 @@ final class TypeScriptGenerator
         }
 
         return [
-            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes),
+            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes, $channelTypes),
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
             'queries' => self::renderQueryMap($queries),
@@ -673,8 +684,9 @@ final class TypeScriptGenerator
      * @param list<RouteTypes>  $routes
      * @param list<SharedTypes> $shared
      * @param list<array{map: string, table: string}> $endpoints
+     * @param list<string> $channels each channel's line in the ChannelMap
      */
-    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = []): string
+    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = [], array $channels = []): string
     {
         $out = $this->preamble('Source of truth: the PHP Data classes, #[Page] and #[Layout] routes, and #[Action] methods.');
 
@@ -695,6 +707,9 @@ final class TypeScriptGenerator
         }
         if ($endpoints !== []) {
             $imports .= \sprintf("import { endpoints } from %s;\n", self::literal(self::ENDPOINT_RUNTIME, 'The endpoint runtime'));
+        }
+        if ($channels !== []) {
+            $imports .= \sprintf("import { channels } from %s;\n", self::literal(self::CHANNEL_RUNTIME, 'The channel runtime'));
         }
         // From the package, not declared here: isRescued() narrows by it, and
         // two declarations of one shape are a drift waiting to happen.
@@ -731,6 +746,7 @@ final class TypeScriptGenerator
         $sections[] = $this->renderRoutes($routes);
         $sections[] = $this->renderShared($shared);
         $sections[] = self::renderEndpoints($endpoints);
+        $sections[] = self::renderChannels($channels);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
         // revalidatedRoutes, revalidatedTags and redirect, none of which the
@@ -1195,6 +1211,73 @@ final class TypeScriptGenerator
             . "export interface EndpointMap {\n" . implode('', array_column($endpoints, 'map')) . "}\n\n"
             . "/** Builds an endpoint's URL, or calls it: its Data parsed, nothing for a void one, the Response for one that returns a Response. */\n"
             . "export const endpoint = endpoints<EndpointMap>({\n" . implode('', array_column($endpoints, 'table')) . "});\n";
+    }
+
+    /**
+     * One channel's line in the ChannelMap: its parameters -- a model by
+     * its id, a scalar as itself, an enum as the union of its values --
+     * and the Data class its messages are.
+     */
+    private function describeChannel(CompiledChannel $channel): string
+    {
+        $where = "The channel `{$channel->name}`";
+
+        $params = [];
+        foreach ($channel->parameters as $name) {
+            $type = $channel->scalars[$name] ?? null;
+            $params[] = self::key($name, "{$where}'s parameter {$name}") . ': ' . match (true) {
+                $type === null, $type === 'string' => 'string',
+                $type === 'int' => 'number',
+                $type === 'bool' => 'boolean',
+                default => self::enumValues($type, "{$where}'s parameter {$name}"),
+            };
+        }
+
+        return \sprintf(
+            "  %s: { params: %s; message: %s };\n",
+            self::literal($channel->name, $where),
+            $params === [] ? 'Record<string, never>' : '{ ' . implode('; ', $params) . ' }',
+            $this->types->register($channel->message),
+        );
+    }
+
+    /** A backed enum's values, as a union of literals. */
+    private static function enumValues(string $enum, string $where): string
+    {
+        if (!enum_exists($enum)) {
+            throw new CodegenException("{$where} is typed {$enum}, which is no enum.");
+        }
+
+        $values = [];
+        foreach ((new \ReflectionEnum($enum))->getCases() as $case) {
+            if (!$case instanceof \ReflectionEnumBackedCase) {
+                throw new CodegenException("{$where} is typed {$enum}, which is not backed.");
+            }
+            $value = $case->getBackingValue();
+            $values[] = \is_int($value) ? (string) $value : self::literal($value, $where);
+        }
+
+        return $values === [] ? 'never' : implode(' | ', $values);
+    }
+
+    /**
+     * The ChannelMap and the `channel` that subscribes to what it
+     * describes, by name.
+     *
+     * @param list<string> $channels
+     */
+    private static function renderChannels(array $channels): string
+    {
+        if ($channels === []) {
+            return '';
+        }
+
+        sort($channels);
+
+        return "/** The #[Channel]s, by name: what each is subscribed to with, and the message it carries. */\n"
+            . "export interface ChannelMap {\n" . implode('', $channels) . "}\n\n"
+            . "/** Subscribes to a channel by name: `channel.listen('orders', { order }, (message) => ...)`, or useChannel(). */\n"
+            . "export const channel = channels<ChannelMap>();\n";
     }
 
     /** What a page or layout's loader returns, as a type: each class it may return, and null if it may. */
