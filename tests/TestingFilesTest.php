@@ -148,25 +148,26 @@ function testing(): array
 it('makes each value from the field\'s name and type', function () {
     $fakes = testing()['fakes.ts'];
 
-    expect($fakes)->toContain("export function fakeTfShelf(overrides: Partial<TfShelf> = {}): TfShelf {\n")
-        ->and($fakes)->toContain("    title: 'title',\n")
-        ->and($fakes)->toContain("    weight: 0,\n")
-        ->and($fakes)->toContain("    open: false,\n")
-        ->and($fakes)->toContain("    note: null,\n")
-        ->and($fakes)->toContain("    items: [],\n")
-        ->and($fakes)->toContain("    totals: {},\n")
-        ->and($fakes)->toContain("    first: fakeTfItem(),\n")
-        ->and($fakes)->toContain("    second: null,\n")
+    expect($fakes)->toContain("export function fakeTfShelf(overrides: Overrides<TfShelf> = {}): TfShelf {\n")
+        ->and($fakes)->toContain("      title: 'title',\n")
+        ->and($fakes)->toContain("      weight: 0,\n")
+        ->and($fakes)->toContain("      open: false,\n")
+        ->and($fakes)->toContain("      note: null,\n")
+        ->and($fakes)->toContain("      items: [],\n")
+        ->and($fakes)->toContain("      totals: {},\n")
+        ->and($fakes)->toContain("      first: fakeTfItem(),\n")
+        ->and($fakes)->toContain("      second: null,\n")
         // An enum's first case, by value.
-        ->and($fakes)->toContain("    shade: 'dark',\n")
-        ->and($fakes)->toContain("    extra: null,\n")
-        ->and($fakes)->toContain("    seen: { \$once: 'seen', ttl: null, tags: [], value: 0 },\n")
-        ->and($fakes)->toContain("    latest: { \$merge: 'latest', mode: 'append', reset: false, matchOn: null, items: [] },\n")
-        ->and($fakes)->toContain("    pages: { \$scroll: 'pages', reset: false, page: 1,")
+        ->and($fakes)->toContain("      shade: 'dark',\n")
+        ->and($fakes)->toContain("      extra: null,\n")
+        ->and($fakes)->toContain("      seen: { \$once: 'seen', ttl: null, tags: [], value: 0 },\n")
+        ->and($fakes)->toContain("      latest: { \$merge: 'latest', mode: 'append', reset: false, matchOn: null, items: [] },\n")
+        ->and($fakes)->toContain("      pages: { \$scroll: 'pages', reset: false, page: 1,")
         // The value side of `T | Unrequested` and `T | Rescued`.
-        ->and($fakes)->toContain("    history: [],\n")
-        ->and($fakes)->toContain("    risky: fakeTfItem(),\n")
-        ->and($fakes)->toContain("    ...overrides,\n")
+        ->and($fakes)->toContain("      history: [],\n")
+        ->and($fakes)->toContain("      risky: fakeTfItem(),\n")
+        ->and($fakes)->toContain("    },\n    overrides,\n  );\n")
+        ->and($fakes)->toContain("import { withOverrides, type Overrides } from '@tinvar/react/testing';")
         ->and($fakes)->toContain("import type { ActionResult, TfItem, TfNode, TfShelf } from '../generated';")
         ->and($fakes)->toContain('export function fakeActionResult(');
 });
@@ -202,7 +203,7 @@ it('mocks each query module where tinvarTesting() looks for it', function () {
 // nothing else that would, so without it a fake reached a production page.
 it('imports the testing runtime into every file, the fakes too, so no build can take one', function () {
     foreach (testing() as $path => $source) {
-        expect($source)->toMatch("/^import (?:\\{ mock(?:Query|Action) \\} from )?'@tinvar\\/react\\/testing';$/m", $path);
+        expect($source)->toMatch("/^import (?:\\{ (?:mock(?:Query|Action)|withOverrides, type Overrides) \\} from )?'@tinvar\\/react\\/testing';$/m", $path);
     }
 });
 
@@ -212,7 +213,7 @@ it('refuses Data classes that need each other with no way to stop', function () 
 });
 
 it('ends a structure that refers to itself at a field that may be null', function () {
-    expect(testing()['fakes.ts'])->toContain("    parent: null,\n    children: [],\n");
+    expect(testing()['fakes.ts'])->toContain("      parent: null,\n      children: [],\n");
 });
 
 it('refuses a field no value can fill', function () {
@@ -230,7 +231,7 @@ it('reads no value from anywhere but the type', function () {
     }
 
     // Every string a fake holds is its field's own name, or an enum's case.
-    preg_match_all("/^    ([A-Za-z]+): '([^']*)',$/m", $files, $strings, PREG_SET_ORDER);
+    preg_match_all("/^      ([A-Za-z]+): '([^']*)',$/m", $files, $strings, PREG_SET_ORDER);
     $foreign = array_filter($strings, static fn (array $m): bool => $m[1] !== $m[2] && $m[2] !== TfShade::Dark->value);
     expect($files)->not->toContain('a-secret-from-the-environment')
         ->and(\count($strings))->toBeGreaterThan(2)

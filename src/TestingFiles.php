@@ -9,7 +9,8 @@ namespace Tinvar\Codegen;
  * (tinvar-spec.md, "Testing", "Client components"; ADR 0061):
  *
  *   fakes.ts         `fakeRackData({ name: 'R-14' })` for each Data
- *                    interface, and fakeActionResult().
+ *                    interface, and fakeActionResult(); an override is
+ *                    laid over the defaults at any depth (withOverrides()).
  *   queries/....ts   A mock of each `@queries/*` module: the same functions,
  *                    built on mockQuery(), answering with a fake.
  *   actions/X.ts     A mock of each `@actions/*` module, built on
@@ -95,19 +96,18 @@ final class TestingFiles
                     $this->expression($field['type'], $field['name'], "{$name}.{$field['name']}", $fake),
                 );
             }
-            $lines[] = '    ...overrides,';
             $types[] = $name;
-            $bodies[] = "/** {$name} for a test: each field a placeholder, under the ones `overrides` gives. */\n"
-                . "export function {$fake}(overrides: Partial<{$name}> = {}): {$name} {\n"
-                . "  return {\n" . implode("\n", $lines) . "\n  };\n}\n";
+            $bodies[] = "/** {$name} for a test: each field a placeholder, under the ones `overrides` gives, at any depth. */\n"
+                . "export function {$fake}(overrides: Overrides<{$name}> = {}): {$name} {\n"
+                . "  return withOverrides<{$name}>(\n    {\n" . implode("\n", array_map(static fn (string $l): string => "  {$l}", $lines)) . "\n    },\n    overrides,\n  );\n}\n";
         }
         $this->refuseCycles();
 
         if ($hasActions) {
             $types[] = 'ActionResult';
             $bodies[] = "/** What an action's endpoint answers when it has nothing to say: the mocks' default. */\n"
-                . "export function fakeActionResult(overrides: Partial<ActionResult> = {}): ActionResult {\n"
-                . "  return { value: null, flash: {}, revalidated: [], payloads: {}, ...overrides };\n}\n";
+                . "export function fakeActionResult(overrides: Overrides<ActionResult> = {}): ActionResult {\n"
+                . "  return withOverrides<ActionResult>({ value: null, flash: {}, revalidated: [], payloads: {} }, overrides);\n}\n";
         }
         sort($types);
 
@@ -119,7 +119,7 @@ final class TestingFiles
             . "// Fakes of the PHP Data classes, for component tests. Every value is a placeholder made\n"
             . "// from the field's name and type alone: never a database's, a seeder's or a secret.\n"
             . "// The testing runtime is imported so that no build, and no process but a test, loads them.\n"
-            . "\nimport '@tinvar/react/testing';\n";
+            . ($bodies === [] ? "\nimport '@tinvar/react/testing';\n" : "\nimport { withOverrides, type Overrides } from '@tinvar/react/testing';\n");
         if ($types !== []) {
             $out .= \sprintf(
                 "import type { %s } from %s;\n",
