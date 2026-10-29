@@ -1163,15 +1163,19 @@ final class TypeScriptGenerator
 
         $input = [];
         foreach ($endpoint->formRequests as $class) {
+            $constructorDoc = new \ReflectionClass($class)->getConstructor()?->getDocComment() ?? false;
             foreach (DataShape::fieldsOf($class) as $field) {
                 $type = $field->getType();
+                // An array field says what it holds in its docblock, as a
+                // Data field does; read from the same two places.
+                $hint = DocBlock::typeFor($field->getDocComment(), $field->getName()) ?? DocBlock::typeFor($constructorDoc, $field->getName());
                 $input[] = \sprintf(
                     '%s: %s',
                     self::key($field->getName(), "{$class}::\${$field->getName()}"),
                     // A model field crosses as its id.
                     $type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), Model::class)
                         ? ($type->allowsNull() ? 'string | null' : 'string')
-                        : ($type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName())),
+                        : ($type === null ? 'unknown' : $this->types->map($type, $hint, $class, (new \ReflectionClass($class))->getNamespaceName())),
                 );
             }
         }
