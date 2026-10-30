@@ -16,7 +16,7 @@ use Tinvar\Codegen\TypeScriptGenerator;
 use Tinvar\Endpoints\EndpointRegistry;
 use Tinvar\Tests\Codegen\Fixtures\Endpoints\RackEndpoints;
 
-require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/models.php';
 require_once __DIR__ . '/Fixtures/endpoints.php';
 
 const ROOT = __DIR__ . '/../../..';

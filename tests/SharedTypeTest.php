@@ -18,10 +18,10 @@ use Tinvar\Data\SharedRegistry;
 use Tinvar\Tests\Data\Fixtures\Shared\PageWithGreetingData;
 use Tinvar\Tests\Data\Fixtures\Shared\SiteShared;
 
-require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
-require_once __DIR__ . '/../../framework/tests/Query/Fixtures/queries.php';
-require_once __DIR__ . '/../../framework/tests/Data/Fixtures/shared.php';
-require_once __DIR__ . '/../../framework/tests/Data/Fixtures/shared-once.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/models.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Query/Fixtures/queries.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Data/Fixtures/shared.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Data/Fixtures/shared-once.php';
 
 const ROOT = __DIR__ . '/../../..';
 const TSC = ROOT . '/node_modules/.bin/tsc';

@@ -16,7 +16,7 @@ use Tinvar\Tests\Transfers\Fixtures\StockImport;
 use Tinvar\Tests\Transfers\Fixtures\WidgetsExport;
 use Tinvar\Transfers\TransferRegistry;
 
-require_once __DIR__ . '/../../framework/tests/Transfers/Fixtures/app.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Transfers/Fixtures/app.php';
 
 const ROOT = __DIR__ . '/../../..';
 const TSC = ROOT . '/node_modules/.bin/tsc';

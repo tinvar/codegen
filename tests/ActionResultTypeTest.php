@@ -26,9 +26,9 @@ use Tinvar\Tests\Actions\Fixtures as A;
 use Tinvar\Tests\Orm\Fixtures\Fixture;
 use Tinvar\Validation\Validator;
 
-require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
-require_once __DIR__ . '/../../database/tests/Orm/Fixtures/schema.php';
-require_once __DIR__ . '/../../framework/tests/Actions/Fixtures/actions.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/models.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/schema.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Actions/Fixtures/actions.php';
 
 /** The fields of the generated ActionResult, in order. */
 function typed(ActionRegistry $registry): array

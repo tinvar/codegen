@@ -17,7 +17,7 @@ use Tinvar\Routing\RouteRegistry;
 use Tinvar\Tests\Codegen\Fixtures as F;
 
 require_once __DIR__ . '/Fixtures/surface.php';
-require_once __DIR__ . '/../../database/tests/Orm/Fixtures/models.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/models.php';
 
 /** The module file, then the ambient one, then each action module. */
 function emit(array $data = [], array $queries = [], array $routes = [], array $actions = [], string $header = ''): string
@@ -203,7 +203,7 @@ describe('actions', function () {
     // "Uploaded files are referenced only by a server-issued upload ticket":
     // what crosses is the reference /_upload answered with, a string.
     it('types an upload parameter as the reference a form sends, optional where the parameter is', function () {
-        require_once __DIR__ . '/../../framework/tests/Uploads/Fixtures/app.php';
+        require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Uploads/Fixtures/app.php';
         $registry = new ActionRegistry();
         $registry->register(\Tinvar\Tests\Uploads\Fixtures\ProfileActions::class);
 
