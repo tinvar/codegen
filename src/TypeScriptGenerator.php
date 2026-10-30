@@ -632,6 +632,11 @@ final class TypeScriptGenerator
         }
         foreach ($action->formRequests as $class) {
             foreach (DataShape::fieldsOf($class) as $field) {
+                // An upload field is typed above, with the action's own: a
+                // reference, never the Upload the body is handed.
+                if (isset($action->uploads[$field->getName()])) {
+                    continue;
+                }
                 $type = $field->getType();
                 $arguments[] = \sprintf(
                     '%s: %s',
