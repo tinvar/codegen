@@ -315,6 +315,7 @@ final class TestingFiles
                 'OnceField' => "{ \$once: {$path}, ttl: null, tags: [], value: " . $this->expression($inner, $field, $where, $fake) . ' }',
                 'MergeField' => "{ \$merge: {$path}, mode: 'append', reset: false, matchOn: null, items: [] }",
                 'ScrollField' => "{ \$scroll: {$path}, reset: false, page: 1, previous: null, next: null, total: 0, perPage: 15, pageName: 'page', matchOn: null, items: [] }",
+                'CursorScrollField' => "{ \$scroll: {$path}, reset: false, cursor: null, previous: null, next: null, total: null, perPage: 15, pageName: 'cursor', matchOn: null, items: [] }",
                 default => throw new CodegenException("{$where} is typed {$type}, which codegen cannot make a fake of."),
             };
         }

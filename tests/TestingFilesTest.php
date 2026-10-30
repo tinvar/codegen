@@ -22,6 +22,7 @@ use Tinvar\Attributes\Query;
 use Tinvar\Attributes\Rescue;
 use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\TypeScriptGenerator;
+use Tinvar\Data\CursorScroll;
 use Tinvar\Data\Data;
 use Tinvar\Data\Scroll;
 use Tinvar\Support\Lazy;
@@ -55,6 +56,7 @@ final readonly class TfShelf extends Data
      * @param Lazy<list<TfItem>>    $history
      * @param Lazy<TfItem>          $risky
      * @param Lazy<list<TfItem>>    $more
+     * @param CursorScroll<TfItem>  $recent
      */
     public function __construct(
         public string $title,
@@ -80,6 +82,7 @@ final readonly class TfShelf extends Data
         public TfPaged $paged,
         #[Optional, Merge(matchOn: 'id')]
         public Lazy $more,
+        public CursorScroll $recent,
     ) {}
 }
 
@@ -181,6 +184,7 @@ it('makes each value from the field\'s name and type', function () {
         // Its own fake, the list under the path an empty merge field.
         ->and($fakes)->toContain("      paged: { ...fakeTfPaged(), data: { \$merge: 'paged.data', mode: 'append', reset: false, matchOn: null, items: [] } },\n")
         ->and($fakes)->toContain("      more: { \$merge: 'more', mode: 'append', reset: false, matchOn: null, items: [] },\n")
+        ->and($fakes)->toContain("      recent: { \$scroll: 'recent', reset: false, cursor: null, previous: null, next: null, total: null,")
         ->and($fakes)->toContain("    },\n    overrides,\n  );\n")
         ->and($fakes)->toContain("import { withOverrides, type Overrides } from '@tinvar/react/testing';")
         ->and($fakes)->toContain("import type { ActionResult, TfItem, TfNode, TfPaged, TfShelf } from '../generated';")

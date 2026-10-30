@@ -280,6 +280,7 @@ final class TypeScriptGenerator
             'MergeField' => $this->merges,
             'Unrequested' => $this->optionals,
             'ScrollField' => $this->types->mappedScroll(),
+            'CursorScrollField' => $this->types->mappedCursorScroll(),
         ];
         foreach ($imported as $type => $used) {
             if ($used && \in_array($type, $this->types->registered(), true)) {
@@ -767,6 +768,7 @@ final class TypeScriptGenerator
         }
         $merging = array_values(array_filter([
             $this->merges ? 'MergeField' : null,
+            $this->types->mappedCursorScroll() ? 'CursorScrollField' : null,
             $this->types->mappedScroll() ? 'ScrollField' : null,
         ]));
         if ($merging !== []) {

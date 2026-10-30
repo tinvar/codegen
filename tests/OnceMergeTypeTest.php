@@ -17,6 +17,7 @@ use Tinvar\Attributes\Once;
 use Tinvar\Attributes\Rescue;
 use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\TypeScriptGenerator;
+use Tinvar\Data\CursorScroll;
 use Tinvar\Data\Data;
 use Tinvar\Data\Encoder;
 use Tinvar\Support\Lazy;
@@ -37,6 +38,7 @@ final readonly class OmPage extends Data
      * @param Scroll<OmItem>     $items
      * @param Lazy<int>          $risky
      * @param Lazy<list<OmItem>> $more
+     * @param CursorScroll<OmItem> $recent
      */
     public function __construct(
         #[Once(until: '1d')]
@@ -52,6 +54,7 @@ final readonly class OmPage extends Data
         public OmPaged $paged,
         #[Merge, Rescue]
         public Lazy $more,
+        public CursorScroll $recent,
     ) {}
 }
 
@@ -79,7 +82,8 @@ it('types each field as what the encoder sends for it', function () {
     $module = new TypeScriptGenerator()->generate([OmPage::class]);
 
     expect($module)->toContain("import type { OnceField } from '@tinvar/react/once';")
-        ->and($module)->toContain("import type { MergeField, ScrollField } from '@tinvar/react/merge';")
+        ->and($module)->toContain("import type { MergeField, CursorScrollField, ScrollField } from '@tinvar/react/merge';")
+        ->and($module)->toContain('  recent: CursorScrollField<OmItem>;')
         ->and($module)->toContain('  total: OnceField<number>;')
         ->and($module)->toContain('  countries: OnceField<OmItem[]>;')
         ->and($module)->toContain('  latest: MergeField<OmItem>;')
@@ -116,6 +120,7 @@ it('describes what the encoder actually sends', function () {
         risky: Lazy::value(1),
         paged: new OmPaged([new OmItem('c', 'C')], 4),
         more: Lazy::value([]),
+        recent: new CursorScroll([new OmItem('d', 'D')], cursor: null, previous: null, next: 'n.1'),
     );
 
     $sent = new Encoder()->encode($page, new PayloadContext(heldOnce: ['countries']), 'page');
@@ -127,7 +132,9 @@ it('describes what the encoder actually sends', function () {
         ->toBe(['$scroll', 'reset', 'page', 'previous', 'next', 'total', 'perPage', 'pageName', 'matchOn', 'items'])
         ->and(array_keys($sent['paged']))->toBe(['data', 'total'])
         ->and(array_keys($sent['paged']['data']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items'])
-        ->and(array_keys($sent['more']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items']);
+        ->and(array_keys($sent['more']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items'])
+        ->and(array_keys($sent['recent']))
+        ->toBe(['$scroll', 'reset', 'cursor', 'previous', 'next', 'total', 'perPage', 'pageName', 'matchOn', 'items']);
 });
 
 it('compiles, and makes a component go through <Once> and <Merged> to read them', function () {
@@ -158,6 +165,9 @@ it('compiles, and makes a component go through <Once> and <Merged> to read them'
                   </InfiniteScroll>
                   {data.paged.total.toFixed(0)}
                   <Merged field={data.paged.data}>{(item) => <i key={item.id}>{item.title}</i>}</Merged>
+                  <InfiniteScroll data={data.recent} manual>
+                    {(item) => <p key={item.id}>{item.title}</p>}
+                  </InfiniteScroll>
                   {total}
                 </>
               );

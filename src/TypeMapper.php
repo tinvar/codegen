@@ -8,6 +8,7 @@ use Tinvar\Data\Data;
 use Tinvar\Data\ProvidesData;
 use Tinvar\Data\SharedRegistry;
 use Tinvar\Support\Lazy;
+use Tinvar\Data\CursorScroll;
 use Tinvar\Data\Scroll;
 use Tinvar\Support\Str;
 
@@ -32,6 +33,9 @@ final class TypeMapper
 
     /** Whether a Scroll has been mapped; see mappedScroll(). */
     private bool $scrolls = false;
+
+    /** Whether a CursorScroll has been mapped; see mappedCursorScroll(). */
+    private bool $cursorScrolls = false;
 
     /** @var array<class-string<\BackedEnum>, string> string-backed enum => emitted type name */
     private array $enums = [];
@@ -139,6 +143,7 @@ final class TypeMapper
             'mixed' => 'unknown',
             'array' => $this->mapArray($docHint, $where),
             Scroll::class => $this->mapScroll($docHint, $where),
+            CursorScroll::class => $this->mapCursorScroll($docHint, $where),
             // Reflection names a class in full; there is nothing to resolve.
             // Lazy by is_a(), so its name from before the split, an alias of
             // it, is read as Lazy too.
@@ -286,6 +291,30 @@ final class TypeMapper
     }
 
     /**
+     * `CursorScroll<T>` becomes `CursorScrollField<T>`: one page of items,
+     * and the cursors either side -- what the encoder sends for one.
+     */
+    private function mapCursorScroll(?string $docHint, string $where): string
+    {
+        $element = DocBlock::cursorScrollType($docHint);
+        if ($element === null) {
+            throw new CodegenException(
+                "No item type for the CursorScroll field at {$where}. Add `@var CursorScroll<OrderData>`.",
+            );
+        }
+
+        $this->cursorScrolls = true;
+
+        return sprintf('CursorScrollField<%s>', $this->mapElement($element, $where));
+    }
+
+    /** Whether any CursorScroll was mapped, so the module needs the CursorScrollField type. */
+    public function mappedCursorScroll(): bool
+    {
+        return $this->cursorScrolls;
+    }
+
+    /**
      * Maps a docblock type string, for places where no ReflectionType exists.
      *
      * @param array<string, string> $imports
@@ -309,6 +338,12 @@ final class TypeMapper
             $this->scrolls = true;
 
             return sprintf('ScrollField<%s>', $this->mapElement($scroll, $where));
+        }
+        $scroll = DocBlock::cursorScrollType($element);
+        if ($scroll !== null) {
+            $this->cursorScrolls = true;
+
+            return sprintf('CursorScrollField<%s>', $this->mapElement($scroll, $where));
         }
 
         $inner = DocBlock::elementType($element);
