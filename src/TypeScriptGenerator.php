@@ -404,6 +404,16 @@ final class TypeScriptGenerator
             $declaring = $property->getDeclaringClass();
             $mapped = $this->types->map($type, $hint, $where, $declaring->getNamespaceName(), Imports::of($declaring));
 
+            // Its items, with what the browser merges them by -- what the
+            // encoder sends for a #[Merge] field. DataShape has already
+            // refused one that is not a list, a Lazy, or a Data object
+            // holding one under the path. Of the resolved value, so before
+            // a rescued marker joins it: a failure is sent unmerged.
+            if (isset($merged[$field])) {
+                $mapped = $this->mergedType($merged[$field]->path(), $mapped, $where);
+                $this->merges = true;
+            }
+
             // What the encoder sends when the field's resolver throws, so a
             // component cannot read the value without deciding what to show
             // instead. Only a Lazy is ever resolved by the encoder, so only a
@@ -418,17 +428,6 @@ final class TypeScriptGenerator
                 }
                 $mapped .= ' | Rescued';
                 $this->rescues = true;
-            }
-
-            // Its items, with what the browser merges them by -- what the
-            // encoder sends for a #[Merge] field. DataShape has already
-            // refused one that is not a list.
-            if (isset($merged[$field])) {
-                if (!str_ends_with($mapped, '[]')) {
-                    throw new CodegenException("{$where} is #[Merge], so its docblock must say what it is a list of.");
-                }
-                $mapped = sprintf('MergeField<%s>', substr($mapped, 0, -2));
-                $this->merges = true;
             }
 
             // Its value, or -- in a response to a client that holds it -- its
@@ -459,6 +458,34 @@ final class TypeScriptGenerator
             $name,
             implode("\n", $lines),
         );
+    }
+
+    /**
+     * The type of a #[Merge] field: `MergeField<T>` for a list of T; for a
+     * Data object holding the list under a path, that object with the list
+     * swapped for its merge field, its item type read off the object's own
+     * interface -- `Omit<FeedData, 'data'> & { data: MergeField<FeedData['data'][number]> }`
+     * -- so the rest of the object is typed as it is sent (ADR 0120).
+     */
+    private function mergedType(?string $path, string $mapped, string $where): string
+    {
+        if ($path === null) {
+            if (!str_ends_with($mapped, '[]')) {
+                throw new CodegenException("{$where} is #[Merge], so its docblock must say what it is a list of.");
+            }
+
+            return sprintf('MergeField<%s>', substr($mapped, 0, -2));
+        }
+
+        if (preg_match(self::IDENTIFIER, $mapped) !== 1) {
+            throw new CodegenException(
+                "{$where} is #[Merge] into '{$path}', so it must be one Data object -- not `{$mapped}` -- "
+                . "whose '{$path}' is the list.",
+            );
+        }
+        $key = self::key($path, $where);
+
+        return sprintf('Omit<%1$s, %2$s> & { %3$s: MergeField<%1$s[%2$s][number]> }', $mapped, self::literal($path, $where), $key);
     }
 
     /**

@@ -293,6 +293,18 @@ final class TestingFiles
             return '[]';
         }
 
+        // A #[Merge] into a path of a Data object: the object's own fake,
+        // with the list under the path an empty merge field (ADR 0120).
+        if (preg_match('/^Omit<([A-Za-z_$][\w$]*), \'([A-Za-z_][A-Za-z0-9_]*)\'> & \{ \2: MergeField<.*> \}$/s', $member, $merged) === 1) {
+            if (!isset($this->interfaces[$merged[1]])) {
+                throw new CodegenException("{$where} is typed {$type}, which codegen cannot make a fake of.");
+            }
+            $path = TypeScriptGenerator::literal("{$field}.{$merged[2]}", $where);
+
+            return '{ ...' . $this->call('fake' . $merged[1], $fake)
+                . ", {$merged[2]}: { \$merge: {$path}, mode: 'append', reset: false, matchOn: null, items: [] } }";
+        }
+
         $generic = self::generic($member);
         if ($generic !== null) {
             [$name, $inner] = $generic;

@@ -54,6 +54,7 @@ final readonly class TfShelf extends Data
      * @param Scroll<TfItem>        $pages
      * @param Lazy<list<TfItem>>    $history
      * @param Lazy<TfItem>          $risky
+     * @param Lazy<list<TfItem>>    $more
      */
     public function __construct(
         public string $title,
@@ -75,7 +76,18 @@ final readonly class TfShelf extends Data
         public Lazy $history,
         #[Rescue]
         public Lazy $risky,
+        #[Merge(append: 'data')]
+        public TfPaged $paged,
+        #[Optional, Merge(matchOn: 'id')]
+        public Lazy $more,
     ) {}
+}
+
+/** A page of a paginator's shape, merged into by its `data`. */
+final readonly class TfPaged extends Data
+{
+    /** @param list<TfItem> $data */
+    public function __construct(public array $data, public int $total) {}
 }
 
 final readonly class TfLoopA extends Data
@@ -166,9 +178,12 @@ it('makes each value from the field\'s name and type', function () {
         // The value side of `T | Unrequested` and `T | Rescued`.
         ->and($fakes)->toContain("      history: [],\n")
         ->and($fakes)->toContain("      risky: fakeTfItem(),\n")
+        // Its own fake, the list under the path an empty merge field.
+        ->and($fakes)->toContain("      paged: { ...fakeTfPaged(), data: { \$merge: 'paged.data', mode: 'append', reset: false, matchOn: null, items: [] } },\n")
+        ->and($fakes)->toContain("      more: { \$merge: 'more', mode: 'append', reset: false, matchOn: null, items: [] },\n")
         ->and($fakes)->toContain("    },\n    overrides,\n  );\n")
         ->and($fakes)->toContain("import { withOverrides, type Overrides } from '@tinvar/react/testing';")
-        ->and($fakes)->toContain("import type { ActionResult, TfItem, TfNode, TfShelf } from '../generated';")
+        ->and($fakes)->toContain("import type { ActionResult, TfItem, TfNode, TfPaged, TfShelf } from '../generated';")
         ->and($fakes)->toContain('export function fakeActionResult(');
 });
 

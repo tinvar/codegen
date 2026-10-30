@@ -36,6 +36,7 @@ final readonly class OmPage extends Data
      * @param list<OmItem>       $latest
      * @param Scroll<OmItem>     $items
      * @param Lazy<int>          $risky
+     * @param Lazy<list<OmItem>> $more
      */
     public function __construct(
         #[Once(until: '1d')]
@@ -47,7 +48,17 @@ final readonly class OmPage extends Data
         public Scroll $items,
         #[Once, Rescue]
         public Lazy $risky,
+        #[Merge(append: 'data', matchOn: 'id')]
+        public OmPaged $paged,
+        #[Merge, Rescue]
+        public Lazy $more,
     ) {}
+}
+
+final readonly class OmPaged extends Data
+{
+    /** @param list<OmItem> $data */
+    public function __construct(public array $data, public int $total) {}
 }
 
 final readonly class OmPlain extends Data
@@ -74,7 +85,11 @@ it('types each field as what the encoder sends for it', function () {
         ->and($module)->toContain('  latest: MergeField<OmItem>;')
         ->and($module)->toContain('  items: ScrollField<OmItem>;')
         // Rescue applies to the resolved value, which once wraps.
-        ->and($module)->toContain('  risky: OnceField<number | Rescued>;');
+        ->and($module)->toContain('  risky: OnceField<number | Rescued>;')
+        // The object as it is sent, the list under the path its merge field.
+        ->and($module)->toContain("  paged: Omit<OmPaged, 'data'> & { data: MergeField<OmPaged['data'][number]> };")
+        // Merged once resolved, so a rescued failure is beside the merge field.
+        ->and($module)->toContain('  more: MergeField<OmItem> | Rescued;');
 });
 
 it('imports none of the types for a module that needs none', function () {
@@ -99,6 +114,8 @@ it('describes what the encoder actually sends', function () {
         latest: [new OmItem('a', 'A')],
         items: Scroll::paginate([new OmItem('b', 'B')], page: 1, perPage: 1, total: 2),
         risky: Lazy::value(1),
+        paged: new OmPaged([new OmItem('c', 'C')], 4),
+        more: Lazy::value([]),
     );
 
     $sent = new Encoder()->encode($page, new PayloadContext(heldOnce: ['countries']), 'page');
@@ -107,7 +124,10 @@ it('describes what the encoder actually sends', function () {
         ->and(array_keys($sent['countries']))->toBe(['$once', 'held'])
         ->and(array_keys($sent['latest']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items'])
         ->and(array_keys($sent['items']))
-        ->toBe(['$scroll', 'reset', 'page', 'previous', 'next', 'total', 'perPage', 'pageName', 'matchOn', 'items']);
+        ->toBe(['$scroll', 'reset', 'page', 'previous', 'next', 'total', 'perPage', 'pageName', 'matchOn', 'items'])
+        ->and(array_keys($sent['paged']))->toBe(['data', 'total'])
+        ->and(array_keys($sent['paged']['data']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items'])
+        ->and(array_keys($sent['more']))->toBe(['$merge', 'mode', 'reset', 'matchOn', 'items']);
 });
 
 it('compiles, and makes a component go through <Once> and <Merged> to read them', function () {
@@ -136,6 +156,8 @@ it('compiles, and makes a component go through <Once> and <Merged> to read them'
                   <InfiniteScroll data={data.items} manualAfter={2}>
                     {(item) => <p key={item.id}>{item.title}</p>}
                   </InfiniteScroll>
+                  {data.paged.total.toFixed(0)}
+                  <Merged field={data.paged.data}>{(item) => <i key={item.id}>{item.title}</i>}</Merged>
                   {total}
                 </>
               );
