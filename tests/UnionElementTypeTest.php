@@ -66,3 +66,30 @@ it('maps a union or nullable element type on a Data field', function () {
         ->toContain('items: (UeItem | null)[];')
         ->toContain('later: number[] | null;');
 });
+
+final readonly class UeFlags extends Data
+{
+    /**
+     * @param list<true>         $set
+     * @param list<string|false> $names
+     */
+    public function __construct(
+        public true $on,
+        public string|false $label,
+        public array $set,
+        public array $names,
+    ) {}
+}
+
+it('maps true and false to their literal types in a docblock, as on a native type', function () {
+    $types = new TypeMapper();
+
+    expect($types->mapHint('true', 'x'))->toBe('true')
+        ->and($types->mapHint('false', 'x'))->toBe('false')
+        ->and($types->mapHint('bool', 'x'))->toBe('boolean')
+        ->and((new TypeScriptGenerator())->generate([UeFlags::class]))
+        ->toContain('on: true;')
+        ->toContain('label: string | false;')
+        ->toContain('set: true[];')
+        ->toContain('names: (string | false)[];');
+});

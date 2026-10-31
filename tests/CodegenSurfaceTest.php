@@ -38,7 +38,7 @@ describe('data shapes', function () {
             ->toContain('legacy: CgSite[];')
             ->toContain('counts: number[];')
             ->toContain('series: Record<string, number[]>;')
-            ->toContain('flags: boolean[];')
+            ->toContain('flags: true[];')
             ->toContain('anything: unknown[];')
             ->toContain('nothing: null[];')
             ->toContain('plain: CgSite[];')

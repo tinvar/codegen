@@ -385,7 +385,11 @@ final class TypeMapper
         return match ($element) {
             'string' => 'string',
             'int', 'float', 'number' => 'number',
-            'bool', 'true', 'false' => 'boolean',
+            'bool' => 'boolean',
+            // The literal types, as a native `true` or `false` maps: a
+            // docblock's `list<true>` was `boolean[]`, and allowed false.
+            'true' => 'true',
+            'false' => 'false',
             'mixed' => 'unknown',
             'null' => 'null',
             default => $this->mapClass($element, $where),
