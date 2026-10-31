@@ -217,6 +217,9 @@ final class TypeScriptGenerator
         $this->interfaces = [];
         $this->fields = [];
         $this->rescues = false;
+        $this->onces = false;
+        $this->merges = false;
+        $this->optionals = false;
         $this->types = new TypeMapper();
 
         foreach ($fieldEnums as $enum) {
