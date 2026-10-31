@@ -8,6 +8,7 @@ use Tinvar\Actions\ActionRegistry;
 use Tinvar\Channels\ChannelRegistry;
 use Tinvar\Data\Data;
 use Tinvar\Data\SharedRegistry;
+use Tinvar\Discovery\DiscoveredClasses;
 use Tinvar\Endpoints\EndpointRegistry;
 use Tinvar\Routing\RouteRegistry;
 use Tinvar\Transfers\TransferRegistry;
@@ -65,6 +66,27 @@ final readonly class CodegenCommand
         private array $channels = [],
         private array $transfers = [],
     ) {}
+
+    /**
+     * Codegen for what an application registers, as its Kernel's classes()
+     * says (ADR 0146): every Data class it has, routable or not, and each
+     * entry point and field enum.
+     */
+    public static function of(string $out, DiscoveredClasses $classes): self
+    {
+        return new self(
+            $out,
+            payloads: $classes->payloads,
+            queries: $classes->queries,
+            routes: $classes->routes,
+            actions: $classes->actions,
+            fieldEnums: $classes->fieldEnums,
+            shared: $classes->shared,
+            endpoints: $classes->endpoints,
+            channels: $classes->channels,
+            transfers: $classes->transfers,
+        );
+    }
 
     /** @param list<string> $arguments */
     public function run(array $arguments): int
