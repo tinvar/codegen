@@ -8,7 +8,7 @@ namespace Tinvar\Codegen;
  * Just enough docblock reading to recover element types PHP's own types drop.
  *
  * Deliberately small: it understands `list<T>`, `array<T>`, `array<K, V>`,
- * `T[]` and `Lazy<T>`, and nothing else.
+ * `T[]`, `Lazy<T>`, unions of those and `?T`, and nothing else.
  */
 final class DocBlock
 {
@@ -94,6 +94,11 @@ final class DocBlock
         }
         $hint = self::withoutNull(trim($hint));
 
+        // A union of arrays is not one array: TypeMapper maps it part by part.
+        if (\count(self::union($hint)) > 1) {
+            return null;
+        }
+
         if (preg_match('/^(?:list|non-empty-list)<(.+)>$/s', $hint, $m) === 1) {
             return ['key' => null, 'value' => $m[1]];
         }
@@ -143,12 +148,29 @@ final class DocBlock
     }
 
     /**
-     * `list<T>|null` is how a nullable array is written; whether it may be
-     * null comes from the PHP type, so the docblock's `null` is dropped. It
-     * was read as one opaque hint, and every nullable list was refused.
+     * The members of a union, split on the `|`s outside brackets: `int|null`
+     * is two, `list<int|null>` one.
+     *
+     * @return list<string>
      */
-    private static function withoutNull(string $hint): string
+    public static function union(string $hint): array
     {
+        return self::splitTopLevel($hint, '|');
+    }
+
+    /**
+     * `list<T>|null` -- or `?list<T>` -- is how a nullable array is written;
+     * whether it may be null comes from the PHP type, so the docblock's
+     * `null` is dropped. It was read as one opaque hint, and every nullable
+     * list was refused.
+     */
+    public static function withoutNull(string $hint): string
+    {
+        $hint = trim($hint);
+        if (str_starts_with($hint, '?')) {
+            return trim(substr($hint, 1));
+        }
+
         $parts = array_values(array_filter(
             self::splitTopLevel($hint, '|'),
             static fn (string $part): bool => $part !== 'null',
@@ -166,7 +188,7 @@ final class DocBlock
         };
     }
 
-    /** @return list<string> splits `string, Foo<int, int>` without cutting inside <> */
+    /** @return list<string> splits `string, Foo<int, int>` without cutting inside <>, {} or () */
     private static function splitTopLevel(string $input, string $separator = ','): array
     {
         $parts = [];
@@ -174,9 +196,9 @@ final class DocBlock
         $current = '';
 
         foreach (str_split($input) as $character) {
-            if ($character === '<') {
+            if (str_contains('<{(', $character)) {
                 $depth++;
-            } elseif ($character === '>') {
+            } elseif (str_contains('>})', $character)) {
                 $depth--;
             } elseif ($character === $separator && $depth === 0) {
                 $parts[] = trim($current);

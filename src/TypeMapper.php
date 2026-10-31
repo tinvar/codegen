@@ -164,7 +164,7 @@ final class TypeMapper
      */
     private function mapString(?string $docHint, string $where): string
     {
-        $hint = $docHint === null ? '' : trim((string) preg_replace('/\|\s*null\b|\bnull\s*\|/', '', $docHint));
+        $hint = $docHint === null ? '' : DocBlock::withoutNull((string) preg_replace('/\|\s*null\b|\bnull\s*\|/', '', $docHint));
         if (preg_match('/^value-of<\s*([\\\\A-Za-z_][\\\\A-Za-z0-9_]*)\s*>$/', $hint, $m) !== 1) {
             return 'string';
         }
@@ -230,6 +230,12 @@ final class TypeMapper
 
     private function mapArray(?string $docHint, string $where): string
     {
+        // A union of array shapes, `list<int>|array<string, int>`: each one.
+        $union = $docHint === null ? [] : DocBlock::union(DocBlock::withoutNull($docHint));
+        if (\count($union) > 1 && array_filter($union, static fn (string $part): bool => DocBlock::elementType($part) === null) === []) {
+            return $this->mapElement(implode('|', $union), $where);
+        }
+
         $element = DocBlock::elementType($docHint);
         if ($element === null) {
             throw new CodegenException(
@@ -243,7 +249,13 @@ final class TypeMapper
             return sprintf('Record<%s, %s>', $element['key'], $this->mapElement($element['value'], $where));
         }
 
-        return $this->mapElement($element['value'], $where) . '[]';
+        return self::arrayOf($this->mapElement($element['value'], $where));
+    }
+
+    /** `T[]`, with a union in parentheses: `(string | null)[]`, not `string | null[]`. */
+    private static function arrayOf(string $type): string
+    {
+        return \count(DocBlock::union($type)) > 1 ? "({$type})[]" : "{$type}[]";
     }
 
     /**
@@ -328,8 +340,25 @@ final class TypeMapper
     {
         $element = trim($element);
 
+        // `?T` is `T|null`, and a union is each of its members: `int|null`
+        // was looked up as one class name and refused.
+        if (str_starts_with($element, '?')) {
+            $element = substr($element, 1) . '|null';
+        }
+        $members = DocBlock::union($element);
+        if (\count($members) > 1) {
+            $parts = array_map(fn (string $member): string => $this->mapElement($member, $where), $members);
+
+            return implode(' | ', array_unique($parts));
+        }
+
+        // `(int|string)[]` groups a union to make a list of it.
+        if (str_starts_with($element, '(') && str_ends_with($element, ')')) {
+            return $this->mapElement(substr($element, 1, -1), $where);
+        }
+
         if (str_ends_with($element, '[]')) {
-            return $this->mapElement(substr($element, 0, -2), $where) . '[]';
+            return self::arrayOf($this->mapElement(substr($element, 0, -2), $where));
         }
 
         // A Scroll inside a Lazy, say: the same shape as one in a field.
@@ -350,7 +379,7 @@ final class TypeMapper
         if ($inner !== null) {
             return $inner['key'] !== null
                 ? sprintf('Record<%s, %s>', $inner['key'], $this->mapElement($inner['value'], $where))
-                : $this->mapElement($inner['value'], $where) . '[]';
+                : self::arrayOf($this->mapElement($inner['value'], $where));
         }
 
         return match ($element) {
