@@ -321,7 +321,7 @@ final class TypeScriptGenerator
         $enums = [];
         foreach ($this->types->enums() as $enum => $name) {
             $first = $enum::cases()[0] ?? null;
-            $enums[$name] = $first instanceof \BackedEnum ? self::literal((string) $first->value, "{$enum}::{$first->name}") : null;
+            $enums[$name] = $first instanceof \BackedEnum ? self::caseLiteral($first, $enum) : null;
         }
 
         return new TestingFiles($interfaces, $enums, $this->module, $this->preamble(''))->files($queries, $actions, $hasActions);
@@ -406,7 +406,7 @@ final class TypeScriptGenerator
             // Its docblock's names mean what they mean in the file that
             // declares it.
             $declaring = $property->getDeclaringClass();
-            $mapped = $this->types->map($type, $hint, $where, $declaring->getNamespaceName(), Imports::of($declaring));
+            $mapped = $this->types->mapDataField($type, $hint, $where, $declaring->getNamespaceName(), Imports::of($declaring));
 
             // Its items, with what the browser merges them by -- what the
             // encoder sends for a #[Merge] field. DataShape has already
@@ -856,7 +856,7 @@ final class TypeScriptGenerator
             }
 
             $values = array_map(
-                static fn (\BackedEnum $case): string => self::literal((string) $case->value, "{$enum}::{$case->name}"),
+                static fn (\BackedEnum $case): string => self::caseLiteral($case, $enum),
                 $enum::cases(),
             );
             $sections[] = '/** ' . self::comment($about) . " */\n"
@@ -1109,6 +1109,12 @@ final class TypeScriptGenerator
      * of its own into every consumer's types. A line terminator cannot stand
      * in a string literal at all, U+2028 and U+2029 included.
      */
+    /** A backed enum case's value as TypeScript writes it: a number for an int-backed enum, a string literal for a string-backed one. */
+    private static function caseLiteral(\BackedEnum $case, string $enum): string
+    {
+        return \is_int($case->value) ? (string) $case->value : self::literal($case->value, "{$enum}::{$case->name}");
+    }
+
     public static function literal(string $value, string $where): string
     {
         $escaped = preg_replace_callback(

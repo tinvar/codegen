@@ -173,22 +173,56 @@ final class TypeMapper
         if (!enum_exists($enum) && enum_exists($m[1])) {
             $enum = $m[1];
         }
+        // A string field holds a string-backed enum's values, and no other's.
+        if (!is_subclass_of($enum, \BackedEnum::class) || (string) (new \ReflectionEnum($enum))->getBackingType() !== 'string') {
+            throw new CodegenException("{$where} names value-of<{$enum}>, and only a string-backed enum's values are emitted.");
+        }
 
         return $this->registerEnum($enum, $where);
     }
 
     /**
-     * A string-backed enum, emitted as the union of its values under its
-     * short name: a sort or filter field's set (#[FieldsOf]), or any other
-     * a Data field names with value-of<>.
+     * A Data field's type, where the field's own declaration says it is one
+     * the encoder sends as a scalar (Encoder::declared()): a backed enum as
+     * the union of its values, an immutable moment -- DateTimeImmutable,
+     * CarbonImmutable -- as the ISO 8601 string it crosses as. Anything
+     * else is mapped as any other type is, so an enum or a moment in a
+     * list is refused here as the encoder refuses it.
+     *
+     * @param array<string, string> $imports
+     */
+    public function mapDataField(\ReflectionType $type, ?string $docHint, string $where, ?string $namespace = null, array $imports = []): string
+    {
+        if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
+            $name = $type->getName();
+            if (enum_exists($name) && !is_subclass_of($name, \BackedEnum::class)) {
+                throw new CodegenException("{$where} is a pure enum, which has no value to send; give {$name} a string or int backing.");
+            }
+            $scalar = match (true) {
+                is_subclass_of($name, \BackedEnum::class) => $this->registerEnum($name, $where),
+                is_a($name, \DateTimeImmutable::class, true) => 'string',
+                default => null,
+            };
+            if ($scalar !== null) {
+                return $type->allowsNull() ? "{$scalar} | null" : $scalar;
+            }
+        }
+
+        return $this->map($type, $docHint, $where, $namespace, $imports);
+    }
+
+    /**
+     * A backed enum, emitted as the union of its values under its short
+     * name: a sort or filter field's set (#[FieldsOf]), a string field that
+     * names one with value-of<>, or a field declared as the enum.
      */
     public function registerEnum(string $enum, string $where): string
     {
         if (isset($this->enums[$enum])) {
             return $this->enums[$enum];
         }
-        if (!is_subclass_of($enum, \BackedEnum::class) || (string) (new \ReflectionEnum($enum))->getBackingType() !== 'string') {
-            throw new CodegenException("{$where} names value-of<{$enum}>, and only a string-backed enum's values are emitted.");
+        if (!is_subclass_of($enum, \BackedEnum::class)) {
+            throw new CodegenException("{$where} names {$enum}, which is not a backed enum: it has no values to emit.");
         }
 
         $short = Str::shortName($enum);
