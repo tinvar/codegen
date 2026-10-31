@@ -644,7 +644,7 @@ final class TypeScriptGenerator
                 $arguments[] = \sprintf(
                     '%s: %s',
                     self::key($field->getName(), "{$class}::\${$field->getName()}"),
-                    $type === null ? 'unknown' : $this->types->map($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
+                    $type === null ? 'unknown' : $this->types->mapInputField($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
                 );
             }
         }
@@ -944,7 +944,7 @@ final class TypeScriptGenerator
     private function typesNamedIn(string $members, array $always = []): array
     {
         $names = $always;
-        foreach ($this->types->registered() as $name) {
+        foreach ([...$this->types->registered(), ...$this->types->enums()] as $name) {
             if (preg_match('/\b' . preg_quote($name, '/') . '\b/', $members) === 1) {
                 $names[] = $name;
             }
@@ -1220,7 +1220,7 @@ final class TypeScriptGenerator
                     // A model field crosses as its id.
                     $type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), Model::class)
                         ? ($type->allowsNull() ? 'string | null' : 'string')
-                        : ($type === null ? 'unknown' : $this->types->map($type, $hint, $class, (new \ReflectionClass($class))->getNamespaceName())),
+                        : ($type === null ? 'unknown' : $this->types->mapInputField($type, $hint, $class, (new \ReflectionClass($class))->getNamespaceName())),
                 );
             }
         }

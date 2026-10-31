@@ -212,6 +212,24 @@ final class TypeMapper
     }
 
     /**
+     * A form request's field: a backed enum as the union of its values,
+     * which is what the validator reads into the case (and refuses any
+     * other); anything else as any other type is mapped.
+     *
+     * @param array<string, string> $imports
+     */
+    public function mapInputField(\ReflectionType $type, ?string $docHint, string $where, ?string $namespace = null, array $imports = []): string
+    {
+        if ($type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), \BackedEnum::class)) {
+            $union = $this->registerEnum($type->getName(), $where);
+
+            return $type->allowsNull() ? "{$union} | null" : $union;
+        }
+
+        return $this->map($type, $docHint, $where, $namespace, $imports);
+    }
+
+    /**
      * A backed enum, emitted as the union of its values under its short
      * name: a sort or filter field's set (#[FieldsOf]), a string field that
      * names one with value-of<>, or a field declared as the enum.

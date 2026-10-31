@@ -13,7 +13,12 @@ declare(strict_types=1);
 namespace Tinvar\Tests\Codegen\EnumAndMomentType;
 
 use Carbon\CarbonImmutable;
+use Tinvar\Actions\ActionRegistry;
+use Tinvar\Actions\ActionResult;
+use Tinvar\Attributes\Action;
+use Tinvar\Attributes\PublicAccess;
 use Tinvar\Codegen\CodegenException;
+use Tinvar\Validation\FormRequest;
 use Tinvar\Codegen\TypeScriptGenerator;
 use Tinvar\Data\Data;
 
@@ -45,6 +50,20 @@ final readonly class ParcelData extends Data
     ) {}
 }
 
+final readonly class StageRequest extends FormRequest
+{
+    public function __construct(public Stage $stage, public ?string $note = null) {}
+}
+
+final class ParcelActions
+{
+    #[Action(name: 'parcels.stage'), PublicAccess]
+    public function stage(StageRequest $request): ActionResult
+    {
+        return ActionResult::ok();
+    }
+}
+
 final readonly class StagesData extends Data
 {
     /** @param list<Stage> $stages */
@@ -62,6 +81,18 @@ it('types an enum field as the union of its values, and a moment field as a stri
     expect($module)->toContain("  stage: Stage;\n  urgency: Urgency | null;\n  placedAt: string;\n  shippedAt: string | null;\n  checkedAt: string;\n")
         ->and($module)->toContain("export type Stage = 'placed' | 'shipped';\nexport const Stage: readonly Stage[] = ['placed', 'shipped'];\n")
         ->and($module)->toContain("export type Urgency = 1 | 2;\nexport const Urgency: readonly Urgency[] = [1, 2];\n");
+});
+
+// The validator reads a backed enum field from its value, and refuses any
+// other: so an action's argument is the same union the server takes.
+it('types an action\'s enum field as the union of the values the validator takes', function () {
+    $registry = new ActionRegistry();
+    $registry->register(ParcelActions::class);
+
+    $files = (new TypeScriptGenerator())->files([], [], [], $registry->all());
+
+    expect(implode("\n", $files['actions']))->toContain('stage: Stage; note: string | null')->toContain('import type { ActionResult, Stage } from')
+        ->and($files['module'])->toContain("export type Stage = 'placed' | 'shipped';");
 });
 
 it('refuses an enum in a list, which the encoder refuses, and a pure enum, which has no value to send', function () {
