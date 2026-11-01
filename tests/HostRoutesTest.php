@@ -68,3 +68,23 @@ it('writes an endpoint on another host with its pattern', function () {
         ->toContain("'admin.feed': { methods: ['GET'], segments: ['feed'], host: 'admin.{root}', returns: 'nothing' },")
         ->toContain("'shop.status': { methods: ['GET'], segments: ['status'], returns: 'nothing' },");
 });
+
+final class AccountEndpoints
+{
+    #[\Tinvar\Attributes\Get('/invoices/{invoice}', name: 'account.invoice'), Domain('{account}.{root}'), \Tinvar\Attributes\NoAuthorization(reason: 'a test endpoint')]
+    public function invoice(string $account, string $invoice): void {}
+}
+
+// endpoint() writes the URL of one on a host a parameter takes with route(),
+// which needs that parameter to name the host -- to write a path on acme's
+// own subdomain, and acme's absolute URL from anywhere else. Typed only with
+// the path's, it could not be given.
+it('types an endpoint\'s host parameter beside its path\'s', function () {
+    $registry = new \Tinvar\Endpoints\EndpointRegistry();
+    $registry->register(AccountEndpoints::class);
+    $module = new TypeScriptGenerator()->files([], endpoints: $registry->all())['module'];
+
+    expect($module)
+        ->toContain("'account.invoice': { params: { account: string; invoice: string };")
+        ->toContain("'account.invoice': { methods: ['GET'], segments: ['invoices', '{invoice}'], host: '{account}.{root}', returns: 'nothing' },");
+});
