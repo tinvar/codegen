@@ -54,7 +54,7 @@ final readonly class RouteTypes
             segments: $route->segments,
             nullableData: $nullable,
             host: $route->domain(),
-            hostParameters: $route->host?->parameters ?? [],
+            hostParameters: $route->host->parameters ?? [],
         );
     }
 
