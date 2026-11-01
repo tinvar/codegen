@@ -80,6 +80,17 @@ namespace Tinvar\Tests\Codegen\Fixtures {
         }
     }
 
+    // A batch query's arguments named by scalar type, beside a model's.
+    #[Query(name: 'sites.near', args: ['site' => CgSite::class, 'within' => 'int', 'ratio' => 'float', 'open' => 'bool', 'term' => 'string'])]
+    final class NearSites
+    {
+        /** @return list<CgSite> */
+        public function loadMany(array $calls): array
+        {
+            return [];
+        }
+    }
+
     #[Query]
     final class SearchSites
     {

@@ -80,6 +80,13 @@ describe('queries', function () {
             ->toContain('export function find(args: { site: string }): Promise<CgSite>;');
     });
 
+    // Review: every declared argument was typed `string`, though args takes
+    // "a model class, or a scalar type name".
+    it("types a batch query's scalar arguments as their scalars, and a model's as its key", function () {
+        expect(emit(queries: [F\NearSites::class]))
+            ->toContain('export function near(args: { site: string; within: number; ratio: number; open: boolean; term: string }): Promise<CgSite>;');
+    });
+
     // An untyped parameter allows null, so QueryRegistry does not require it.
     it('types a plain query by its __invoke, untyped parameters as unknown', function () {
         expect(emit(queries: [F\SearchSites::class]))

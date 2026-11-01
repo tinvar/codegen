@@ -508,9 +508,14 @@ final class TypeScriptGenerator
         $wireName = $declaration->name ?? Str::queryName($class);
 
         $args = [];
-        foreach ($declaration->args as $argument => $modelClass) {
-            // A model-typed argument crosses as its key, never as the model.
-            $args[] = ['name' => $argument, 'type' => 'string'];
+        foreach ($declaration->args as $argument => $declared) {
+            // A scalar crosses as itself; a model-typed argument as its key,
+            // never as the model.
+            $args[] = ['name' => $argument, 'type' => match (strtolower(ltrim($declared, '\\'))) {
+                'int', 'float' => 'number',
+                'bool' => 'boolean',
+                default => 'string',
+            }];
         }
 
         if ($args === [] && $reflection->hasMethod('__invoke')) {
