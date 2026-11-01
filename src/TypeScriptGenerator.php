@@ -1253,11 +1253,16 @@ final class TypeScriptGenerator
                 $input === [] ? 'Record<string, never>' : '{ ' . implode('; ', $input) . ' }',
                 $returns,
             ),
+            // One on a host of its own carries its pattern, as a page's
+            // route does, so endpoint() writes a path on that host and an
+            // absolute URL -- which it refuses to send -- anywhere else
+            // (ADR 0149); one on the primary host, its segments alone.
             'table' => \sprintf(
-                "  %s: { methods: [%s], segments: [%s], returns: %s },\n",
+                "  %s: { methods: [%s], segments: [%s], %sreturns: %s },\n",
                 $name,
                 implode(', ', array_map(static fn (string $m): string => self::literal($m, $where), $endpoint->methods)),
                 implode(', ', array_map(static fn (string $s): string => self::literal($s, "A segment of {$where}"), $endpoint->segments)),
+                $endpoint->host === null ? '' : 'host: ' . self::literal($endpoint->host->pattern, "The host of {$where}") . ', ',
                 self::literal($runtime, $where),
             ),
         ];

@@ -46,3 +46,25 @@ it('writes a primary-host route as its segments, and another host\'s with its pa
 it('types a host parameter beside the path\'s', function () {
     expect(emitted())->toContain("'accounts.invoice': { account: string; invoice: string };");
 });
+
+final class FeedEndpoints
+{
+    #[\Tinvar\Attributes\Get('/feed', name: 'admin.feed'), Domain('admin.{root}'), \Tinvar\Attributes\NoAuthorization(reason: 'a test endpoint')]
+    public function adminFeed(): void {}
+
+    #[\Tinvar\Attributes\Get('/status', name: 'shop.status'), \Tinvar\Attributes\NoAuthorization(reason: 'a test endpoint')]
+    public function status(): void {}
+}
+
+// An endpoint on a host of its own is called on that host: its table entry
+// carries the pattern as a page's does, so endpoint() writes a path there
+// and refuses to send it from anywhere else.
+it('writes an endpoint on another host with its pattern', function () {
+    $registry = new \Tinvar\Endpoints\EndpointRegistry();
+    $registry->register(FeedEndpoints::class);
+    $module = new TypeScriptGenerator()->files([], endpoints: $registry->all())['module'];
+
+    expect($module)
+        ->toContain("'admin.feed': { methods: ['GET'], segments: ['feed'], host: 'admin.{root}', returns: 'nothing' },")
+        ->toContain("'shop.status': { methods: ['GET'], segments: ['status'], returns: 'nothing' },");
+});
