@@ -982,13 +982,21 @@ final class TypeScriptGenerator
         $out = '';
 
         if ($pages !== []) {
-            $out .= "export interface PageDataMap {\n";
+            // Pages may share a view (RouteRegistry lets them): one key each,
+            // typed as any of theirs -- two keys were a duplicate tsc refuses.
+            $data = [];
+            $params = [];
             foreach ($pages as $page) {
-                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), $this->dataTypeOf($page));
+                $data[$page->view][$this->dataTypeOf($page)] = true;
+                $params[$page->view][self::paramsType($page->parameters)] = true;
+            }
+            $out .= "export interface PageDataMap {\n";
+            foreach ($data as $view => $types) {
+                $out .= sprintf("  %s: %s;\n", self::literal((string) $view, "The view {$view}"), implode(' | ', array_keys($types)));
             }
             $out .= "}\n\nexport interface PageParamsMap {\n";
-            foreach ($pages as $page) {
-                $out .= sprintf("  %s: %s;\n", self::literal($page->view, "The view {$page->view}"), self::paramsType($page->parameters));
+            foreach ($params as $view => $types) {
+                $out .= sprintf("  %s: %s;\n", self::literal((string) $view, "The view {$view}"), implode(' | ', array_keys($types)));
             }
             $out .= "}\n\n";
             $out .= "export type PageProps<V extends keyof PageDataMap> = {\n"

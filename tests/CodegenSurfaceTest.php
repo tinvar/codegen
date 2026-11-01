@@ -13,6 +13,7 @@ use Tinvar\Codegen\CodegenException;
 use Tinvar\Codegen\DocBlock;
 use Tinvar\Codegen\RouteTypes;
 use Tinvar\Codegen\TypeScriptGenerator;
+use Tinvar\Routing\RouteKind;
 use Tinvar\Routing\RouteRegistry;
 use Tinvar\Tests\Codegen\Fixtures as F;
 
@@ -174,6 +175,20 @@ describe('routes', function () {
             ->toContain('export const route = routes<RouteMap>({')
             ->toContain("  'sites.rack': ['sites', '{site}', 'racks', '{rack}'],\n")
             ->toContain("  'sites.raw': ['sites', 'raw'],\n");
+    });
+
+    // Review: RouteRegistry lets pages share a view, and each became its own
+    // key in PageDataMap and PageParamsMap -- duplicate keys tsc refuses.
+    it('types a view two pages share as the union of theirs, under one key', function () {
+        $ts = emit(routes: [
+            new RouteTypes(RouteKind::Page, 'shared/view', 'shared.a', 'root', [], [F\CgSite::class], ['a']),
+            new RouteTypes(RouteKind::Page, 'shared/view', 'shared.b', 'root', ['id'], [F\CgPage::class], ['b', '{id}']),
+        ]);
+
+        expect($ts)
+            ->toContain("'shared/view': CgSite | CgPage;")
+            ->toContain("'shared/view': Record<string, never> | { id: string };")
+            ->and(substr_count($ts, "'shared/view':"))->toBe(2);
     });
 
     it('emits no route maps without routes', function () {
