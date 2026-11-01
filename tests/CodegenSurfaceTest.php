@@ -58,6 +58,15 @@ describe('data shapes', function () {
         expect(fn () => emit([F\CgIntersection::class]))->toThrow(CodegenException::class, 'intersection');
     });
 
+    // Review: `Lazy<T>|null` and the scrolls' were refused, their patterns
+    // anchored to a hint ending in `>`, though `list<T>|null` maps.
+    it('maps a Lazy, Scroll or CursorScroll that may be null', function () {
+        expect(emit([F\CgNullableWrappers::class]))
+            ->toContain('later: CgSite[] | null;')
+            ->toContain('page: ScrollField<CgSite> | null;')
+            ->toContain('feed: CursorScrollField<CgSite> | null;');
+    });
+
     it('refuses a Lazy field with no value type', function () {
         expect(fn () => emit([F\CgLazyNoHint::class]))->toThrow(CodegenException::class, 'Lazy');
     });

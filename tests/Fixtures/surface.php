@@ -64,6 +64,20 @@ namespace Tinvar\Tests\Codegen\Fixtures {
         public function __construct(public \Tinvar\Support\Lazy $later) {}
     }
 
+    final readonly class CgNullableWrappers extends Data
+    {
+        /**
+         * @param \Tinvar\Support\Lazy<list<CgSite>>|null $later
+         * @param \Tinvar\Data\Scroll<CgSite>|null $page
+         * @param \Tinvar\Data\CursorScroll<CgSite>|null $feed
+         */
+        public function __construct(
+            public ?\Tinvar\Support\Lazy $later,
+            public ?\Tinvar\Data\Scroll $page,
+            public ?\Tinvar\Data\CursorScroll $feed,
+        ) {}
+    }
+
     final readonly class CgUnknownName extends Data
     {
         /** @param list<NoSuchThing> $things */

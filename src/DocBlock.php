@@ -124,7 +124,7 @@ final class DocBlock
             return null;
         }
 
-        return preg_match('/Lazy<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
+        return preg_match('/Lazy<(.+)>$/s', self::withoutNull($hint), $m) === 1 ? $m[1] : null;
     }
 
     /** The item type of `Scroll<T>`, written with or without its namespace. */
@@ -134,7 +134,7 @@ final class DocBlock
             return null;
         }
 
-        return preg_match('/^(?:\\\\?Tinvar\\\\Data\\\\)?Scroll<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
+        return preg_match('/^(?:\\\\?Tinvar\\\\Data\\\\)?Scroll<(.+)>$/s', self::withoutNull($hint), $m) === 1 ? $m[1] : null;
     }
 
     /** The item type of `CursorScroll<T>`, written with or without its namespace. */
@@ -144,7 +144,7 @@ final class DocBlock
             return null;
         }
 
-        return preg_match('/^(?:\\\\?Tinvar\\\\Data\\\\)?CursorScroll<(.+)>$/s', trim($hint), $m) === 1 ? $m[1] : null;
+        return preg_match('/^(?:\\\\?Tinvar\\\\Data\\\\)?CursorScroll<(.+)>$/s', self::withoutNull($hint), $m) === 1 ? $m[1] : null;
     }
 
     /**
