@@ -1021,13 +1021,19 @@ final class TypeScriptGenerator
             $out .= "/** Builds a URL for a named route. A missing parameter is a type error. */\n"
                 . "export const route = routes<RouteMap>({\n";
             foreach ($named as $route) {
+                $segments = '[' . implode(', ', array_map(
+                    static fn (string $segment): string => self::literal($segment, "A segment of the route {$route->name}"),
+                    self::segmentsOf($route),
+                )) . ']';
+                // A route on a host of its own carries its pattern, which
+                // route() writes out with the domains the server configures
+                // (ADR 0149); one on the primary host, its segments alone.
                 $out .= sprintf(
-                    "  %s: [%s],\n",
+                    "  %s: %s,\n",
                     self::literal((string) $route->name, "The route {$route->name}"),
-                    implode(', ', array_map(
-                        static fn (string $segment): string => self::literal($segment, "A segment of the route {$route->name}"),
-                        self::segmentsOf($route),
-                    )),
+                    $route->host === null
+                        ? $segments
+                        : sprintf('{ segments: %s, host: %s }', $segments, self::literal($route->host, "The host of the route {$route->name}")),
                 );
             }
             $out .= "});\n";
@@ -1076,7 +1082,7 @@ final class TypeScriptGenerator
      */
     private static function segmentsOf(RouteTypes $route): array
     {
-        foreach ($route->parameters as $parameter) {
+        foreach (array_diff($route->parameters, $route->hostParameters) as $parameter) {
             if (!\in_array('{' . $parameter . '}', $route->segments, true)) {
                 throw new CodegenException(
                     "The route {$route->name} has a parameter `{$parameter}` its path segments do not place.",

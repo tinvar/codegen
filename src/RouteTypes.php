@@ -23,6 +23,9 @@ final readonly class RouteTypes
      * @param list<string> $segments the path, `racks` or `{rack}` each, which
      *                               the generated route() builds URLs from
      * @param bool $nullableData whether the loader may return null
+     * @param string|null $host the #[Domain] pattern it is served on, null for the primary
+     *                          host; route() builds its absolute URL with it (ADR 0149)
+     * @param list<string> $hostParameters the parameters the host takes, which lead $parameters
      */
     public function __construct(
         public RouteKind $kind,
@@ -33,6 +36,8 @@ final readonly class RouteTypes
         public array $dataClasses,
         public array $segments = [],
         public bool $nullableData = false,
+        public ?string $host = null,
+        public array $hostParameters = [],
     ) {}
 
     public static function of(CompiledRoute $route): self
@@ -48,6 +53,8 @@ final readonly class RouteTypes
             dataClasses: $classes,
             segments: $route->segments,
             nullableData: $nullable,
+            host: $route->domain(),
+            hostParameters: $route->host?->parameters ?? [],
         );
     }
 
