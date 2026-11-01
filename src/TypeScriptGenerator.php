@@ -643,6 +643,7 @@ final class TypeScriptGenerator
         // input as fields of the same form (ActionRunner::scalarParameters()).
         $reflected = method_exists($action->class, $action->method) ? new \ReflectionMethod($action->class, $action->method) : null;
         $namespace = $reflected?->getDeclaringClass()->getNamespaceName() ?? '';
+        $methodDoc = $reflected?->getDocComment() ?? false;
         foreach ($reflected?->getParameters() ?? [] as $parameter) {
             $name = $parameter->getName();
             $type = $parameter->getType();
@@ -654,7 +655,7 @@ final class TypeScriptGenerator
                 '%s%s: %s',
                 self::key($name, "{$action->class}::{$action->method}(\${$name})"),
                 $type->allowsNull() || $parameter->isDefaultValueAvailable() ? '?' : '',
-                $this->types->mapInputField($type, DocBlock::typeFor($reflected->getDocComment(), $name), $action->class, $namespace),
+                $this->types->mapInputField($type, DocBlock::typeFor($methodDoc, $name), $action->class, $namespace),
             );
         }
         foreach ($action->uploads as $parameter => $declared) {
