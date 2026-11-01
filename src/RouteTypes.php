@@ -42,7 +42,7 @@ final readonly class RouteTypes
 
     public static function of(CompiledRoute $route): self
     {
-        [$classes, $nullable] = self::returnTypeOf($route->class);
+        [$classes, $nullable] = self::returnTypeOf($route->class, $route->loader);
 
         return new self(
             kind: $route->kind,
@@ -66,16 +66,18 @@ final readonly class RouteTypes
      * having no data at all.
      *
      * @param class-string $class
+     * @param string $loader the method the route runs: `__invoke`, or an #[AdminResource]'s
+     *        loader for one of its screens (ADR 0150)
      * @return array{list<class-string>, bool}
      */
-    private static function returnTypeOf(string $class): array
+    private static function returnTypeOf(string $class, string $loader = '__invoke'): array
     {
         $reflection = new \ReflectionClass($class);
-        if (!$reflection->hasMethod('__invoke')) {
+        if (!$reflection->hasMethod($loader)) {
             return [[], false];   // "Loaders are optional."
         }
 
-        $type = $reflection->getMethod('__invoke')->getReturnType();
+        $type = $reflection->getMethod($loader)->getReturnType();
         $members = match (true) {
             $type instanceof \ReflectionNamedType => [$type],
             $type instanceof \ReflectionUnionType => $type->getTypes(),
