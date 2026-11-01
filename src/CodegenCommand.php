@@ -6,6 +6,8 @@ namespace Tinvar\Codegen;
 
 use Tinvar\Actions\ActionRegistry;
 use Tinvar\Channels\ChannelRegistry;
+use Tinvar\Notifications\InboxRegistry;
+use Tinvar\Notifications\NotificationRegistry;
 use Tinvar\Data\Data;
 use Tinvar\Data\SharedRegistry;
 use Tinvar\Discovery\DiscoveredClasses;
@@ -53,6 +55,8 @@ final readonly class CodegenCommand
      * @param list<class-string> $endpoints
      * @param list<class-string> $channels
      * @param list<class-string> $transfers
+     * @param list<class-string> $notifications
+     * @param list<class-string> $inboxes
      */
     public function __construct(
         private string $out,
@@ -65,6 +69,8 @@ final readonly class CodegenCommand
         private array $endpoints = [],
         private array $channels = [],
         private array $transfers = [],
+        private array $notifications = [],
+        private array $inboxes = [],
     ) {}
 
     /**
@@ -85,6 +91,8 @@ final readonly class CodegenCommand
             endpoints: $classes->endpoints,
             channels: $classes->channels,
             transfers: $classes->transfers,
+            notifications: $classes->notifications,
+            inboxes: $classes->inboxes,
         );
     }
 
@@ -187,6 +195,8 @@ final readonly class CodegenCommand
             endpoints: $endpoints->all(),
             channels: $channels->all(),
             transfers: $transfers->all(),
+            notifications: NotificationRegistry::of($this->notifications)->all(),
+            inboxes: InboxRegistry::of($this->inboxes)->all(),
         );
 
         $written = ['generated.ts' => $files['module'], 'modules.d.ts' => $files['ambient'], 'queries.json' => $files['queries']];

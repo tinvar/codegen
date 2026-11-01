@@ -12,6 +12,9 @@ use Tinvar\Data\Data;
 use Tinvar\Data\DataFields;
 use Tinvar\Data\DataShape;
 use Tinvar\Channels\CompiledChannel;
+use Tinvar\Notifications\CompiledInbox;
+use Tinvar\Notifications\CompiledNotification;
+use Tinvar\Notifications\NotificationChannel;
 use Tinvar\Endpoints\CompiledEndpoint;
 use Tinvar\Support\Lazy;
 use Tinvar\Orm\Model;
@@ -64,6 +67,9 @@ final class TypeScriptGenerator
     public const CHANNEL_RUNTIME = '@tinvar/react/channel';
     /** Where the generated `transfer` gets its runtime (ADR 0070). */
     public const TRANSFER_RUNTIME = '@tinvar/react/transfer';
+
+    /** Where the generated `inbox` gets its runtime (ADR 0150). */
+    public const INBOX_RUNTIME = '@tinvar/react/inbox';
 
     /** What an identifier written into the output must look like, exactly. */
     private const IDENTIFIER = '/^[A-Za-z_$][A-Za-z0-9_$]*$/D';
@@ -201,6 +207,11 @@ final class TypeScriptGenerator
      * @param list<CompiledTransfer>   $transfers the #[Export] and #[Import] classes: an ExportMap and
      *                                            an ImportMap in the module, and a `transfer` built on
      *                                            TRANSFER_RUNTIME that starts them by name
+     * @param list<CompiledNotification> $notifications the #[Notification] kinds: a NotificationMap
+     *                                            in the module -- the channels each sends on -- and
+     *                                            NotificationType, the union of their types
+     * @param list<CompiledInbox>      $inboxes   the #[Inbox]es: an `inbox` built on INBOX_RUNTIME,
+     *                                            a client for each, by name
      * @return array{module: string, ambient: string, actions: array<string, string>, queries: string, testing: array<string, string>}
      */
     public function files(
@@ -213,6 +224,8 @@ final class TypeScriptGenerator
         array $endpoints = [],
         array $channels = [],
         array $transfers = [],
+        array $notifications = [],
+        array $inboxes = [],
     ): array {
         $this->interfaces = [];
         $this->fields = [];
@@ -292,7 +305,7 @@ final class TypeScriptGenerator
         }
 
         return [
-            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes, $channelTypes, $transferTypes),
+            'module' => $this->renderModule($routes, $actions !== [], $shared, $endpointTypes, $channelTypes, $transferTypes, $notifications, $inboxes),
             'ambient' => $this->renderAmbient($queries),
             'actions' => $this->renderActions($described),
             'queries' => self::renderQueryMap($queries),
@@ -755,8 +768,10 @@ final class TypeScriptGenerator
      * @param list<array{map: string, table: string}> $endpoints
      * @param list<string> $channels each channel's line in the ChannelMap
      * @param list<array{kind: string, map: string}> $transfers
+     * @param list<CompiledNotification> $notifications
+     * @param list<CompiledInbox> $inboxes
      */
-    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = [], array $channels = [], array $transfers = []): string
+    private function renderModule(array $routes, bool $hasActions, array $shared = [], array $endpoints = [], array $channels = [], array $transfers = [], array $notifications = [], array $inboxes = []): string
     {
         $out = $this->preamble('Source of truth: the PHP Data classes, #[Page] and #[Layout] routes, and #[Action] methods.');
 
@@ -783,6 +798,9 @@ final class TypeScriptGenerator
         }
         if ($transfers !== []) {
             $imports .= \sprintf("import { transfers } from %s;\n", self::literal(self::TRANSFER_RUNTIME, 'The transfer runtime'));
+        }
+        if ($inboxes !== []) {
+            $imports .= \sprintf("import { inboxes } from %s;\n", self::literal(self::INBOX_RUNTIME, 'The inbox runtime'));
         }
         // From the package, not declared here: isRescued() narrows by it, and
         // two declarations of one shape are a drift waiting to happen.
@@ -822,6 +840,7 @@ final class TypeScriptGenerator
         $sections[] = self::renderEndpoints($endpoints);
         $sections[] = self::renderChannels($channels);
         $sections[] = self::renderTransfers($transfers);
+        $sections[] = self::renderNotifications($notifications, $inboxes);
 
         // The body ActionEndpoint answers with, not the PHP object: it typed
         // revalidatedRoutes, revalidatedTags and redirect, none of which the
@@ -1462,6 +1481,48 @@ final class TypeScriptGenerator
                 implode(' | ', array_map(static fn (string $choice): string => self::literal($choice, $where), $choices)),
             ),
         ];
+    }
+
+    /**
+     * The NotificationMap -- each #[Notification]'s type and the channels
+     * it sends on -- NotificationType, and the `inbox` that reads each
+     * #[Inbox] by name, its entries typed by those types.
+     *
+     * @param list<CompiledNotification> $notifications
+     * @param list<CompiledInbox> $inboxes
+     */
+    private static function renderNotifications(array $notifications, array $inboxes): string
+    {
+        if ($notifications === [] && $inboxes === []) {
+            return '';
+        }
+
+        $lines = [];
+        foreach ($notifications as $notification) {
+            $where = "The notification `{$notification->type}`";
+            $lines[] = \sprintf(
+                "  %s: { channels: %s };\n",
+                self::literal($notification->type, $where),
+                $notification->channels === []
+                    ? 'never'
+                    : implode(' | ', array_map(static fn (NotificationChannel $c): string => self::literal($c->value, $where), $notification->channels)),
+            );
+        }
+        sort($lines);
+
+        $out = "/** The #[Notification] kinds, by type: the channels each sends on. */\n"
+            . 'export interface NotificationMap {' . ($lines === [] ? '' : "\n" . implode('', $lines)) . "}\n\n"
+            . "/** A kind of notification, as an inbox entry and a preference name it. */\n"
+            . 'export type NotificationType = ' . ($lines === [] ? 'never' : 'keyof NotificationMap & string') . ";\n";
+        if ($inboxes === []) {
+            return $out;
+        }
+
+        $names = array_map(static fn (CompiledInbox $inbox): string => self::literal($inbox->name, "The inbox `{$inbox->name}`"), $inboxes);
+        sort($names);
+
+        return $out . "\n/** The #[Inbox]es, by name: `useInbox(inbox.customer)`, or <Inbox client={inbox.customer} />. */\n"
+            . 'export const inbox = inboxes<NotificationMap, ' . implode(' | ', $names) . '>([' . implode(', ', $names) . "]);\n";
     }
 
     /**
