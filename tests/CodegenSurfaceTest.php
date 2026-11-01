@@ -217,8 +217,20 @@ describe('actions', function () {
             ->and($files['actions']['SiteActions'])
             ->toContain("import { action } from '@tinvar/react/action';")
             ->toContain("import type { ActionResult } from '../generated';")
-            ->toContain("export const rename = action<{ site: string; name: string; priority: number | null }, ActionResult>('SiteActions.rename');")
+            ->toContain("export const rename = action<{ site: string; name: string; priority?: number | null }, ActionResult>('SiteActions.rename');")
             ->and($files['ambient'])->not->toContain('@actions');
+    });
+
+    // Review: an action's scalar parameters were left out, a model it may go
+    // without typed required, and a form request's model or list field
+    // refused -- though the runner binds them all, and the endpoint's copy
+    // of the same loop typed them.
+    it('types every input an action takes, and what it may leave out as optional', function () {
+        $registry = new ActionRegistry();
+        $registry->register(F\SiteToolActions::class);
+
+        expect((new TypeScriptGenerator())->files([], [], [], $registry->all())['actions']['SiteToolActions'])
+            ->toContain('action<{ site: string; other?: string; by: number; note?: string | null; tags: string[]; rack: string; label?: string }, ActionResult>');
     });
 
     // A reference is a value, handed to <Form> and called: a declaration of

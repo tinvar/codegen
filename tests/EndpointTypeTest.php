@@ -76,7 +76,7 @@ it('describes each endpoint by name, its model fields as ids', function () {
         ->toContain("export interface EndpointMap {\n"
             . "  'racks.label': { params: { rack: string }; input: Record<string, never>; returns: Response };\n"
             . "  'racks.move': { params: { rack: string }; input: { site: string }; returns: RackStockData };\n"
-            . "  'racks.resize': { params: { rack: string }; input: { heightU: number; note: string | null }; returns: undefined };\n"
+            . "  'racks.resize': { params: { rack: string }; input: { heightU: number; note?: string | null }; returns: undefined };\n"
             . "  'racks.stock': { params: { rack: string }; input: Record<string, never>; returns: RackStockData };\n"
             . "}\n")
         ->toContain("  'racks.move': { methods: ['PUT', 'PATCH'], segments: ['racks', '{rack}', 'site'], returns: 'data' },\n");

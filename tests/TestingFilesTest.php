@@ -213,7 +213,7 @@ it('mocks each query module where tinvarTesting() looks for it', function () {
         ->and($files['queries.ts'])->toContain("export const top = mockQuery<{  }, TfItem[]>('top', () => []);")
         ->and($files['queries.ts'])->toContain("import type { TfItem } from '../generated';")
         ->and($files['actions/SiteActions.ts'])->toContain(
-            "export const rename = mockAction<{ site: string; name: string; priority: number | null }, ActionResult>('SiteActions.rename', fakeActionResult);",
+            "export const rename = mockAction<{ site: string; name: string; priority?: number | null }, ActionResult>('SiteActions.rename', fakeActionResult);",
         );
 });
 

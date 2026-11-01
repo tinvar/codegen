@@ -630,7 +630,26 @@ final class TypeScriptGenerator
         $where = "The action `{$action->name}`";
         $arguments = [];
         foreach ($action->models as $parameter => $_) {
-            $arguments[] = self::key($parameter, $where) . ': string';   // a model crosses as its id
+            // A model crosses as its id; one that may be absent may be left out.
+            $arguments[] = self::key($parameter, $where) . (isset($action->optionalModels[$parameter]) ? '?: ' : ': ') . 'string';
+        }
+        // The action's own scalar parameters, which the runner binds from the
+        // input as fields of the same form (ActionRunner::scalarParameters()).
+        $reflected = method_exists($action->class, $action->method) ? new \ReflectionMethod($action->class, $action->method) : null;
+        $namespace = $reflected?->getDeclaringClass()->getNamespaceName() ?? '';
+        foreach ($reflected?->getParameters() ?? [] as $parameter) {
+            $name = $parameter->getName();
+            $type = $parameter->getType();
+            if (isset($action->models[$name]) || isset($action->formRequests[$name]) || isset($action->uploads[$name])
+                || !$type instanceof \ReflectionNamedType || !$type->isBuiltin()) {
+                continue;
+            }
+            $arguments[] = \sprintf(
+                '%s%s: %s',
+                self::key($name, "{$action->class}::{$action->method}(\${$name})"),
+                $type->allowsNull() || $parameter->isDefaultValueAvailable() ? '?' : '',
+                $this->types->mapInputField($type, DocBlock::typeFor($reflected->getDocComment(), $name), $action->class, $namespace),
+            );
         }
         foreach ($action->uploads as $parameter => $declared) {
             // The reference /_upload answered with, never the file itself --
@@ -639,19 +658,9 @@ final class TypeScriptGenerator
                 . ($declared->maxFiles > 1 ? 'string[]' : 'string');
         }
         foreach ($action->formRequests as $class) {
-            foreach (DataShape::fieldsOf($class) as $field) {
-                // An upload field is typed above, with the action's own: a
-                // reference, never the Upload the body is handed.
-                if (isset($action->uploads[$field->getName()])) {
-                    continue;
-                }
-                $type = $field->getType();
-                $arguments[] = \sprintf(
-                    '%s: %s',
-                    self::key($field->getName(), "{$class}::\${$field->getName()}"),
-                    $type === null ? 'unknown' : $this->types->mapInputField($type, null, $class, (new \ReflectionClass($class))->getNamespaceName()),
-                );
-            }
+            // An upload field is typed above, with the action's own: a
+            // reference, never the Upload the body is handed.
+            array_push($arguments, ...$this->formRequestInput($class, $action->uploads));
         }
 
         // Checked as a module path first, for the message, and then as an
@@ -1215,6 +1224,56 @@ final class TypeScriptGenerator
     }
 
     /**
+     * A form request's fields as what a caller sends, for an action and an
+     * endpoint alike: a model field as its id, an array field as its
+     * docblock says, and a field the validator lets be left out -- one that
+     * allows null or has a default (Validator::read()) -- as optional.
+     *
+     * The action's and the endpoint's copies of this had drifted: the
+     * action's read no docblock and refused a model field outright.
+     *
+     * @param class-string $class
+     * @param array<string, mixed> $skip fields typed elsewhere, by name
+     * @return list<string>
+     */
+    private function formRequestInput(string $class, array $skip = []): array
+    {
+        $reflection = new \ReflectionClass($class);
+        $constructor = $reflection->getConstructor();
+        $constructorDoc = $constructor?->getDocComment() ?? false;
+        $parameters = [];
+        foreach ($constructor?->getParameters() ?? [] as $parameter) {
+            $parameters[$parameter->getName()] = $parameter;
+        }
+
+        $input = [];
+        foreach (DataShape::fieldsOf($class) as $field) {
+            $name = $field->getName();
+            if (\array_key_exists($name, $skip)) {
+                continue;
+            }
+            $type = $field->getType();
+            // An array field says what it holds in its docblock, as a Data
+            // field does; read from the same two places.
+            $hint = DocBlock::typeFor($field->getDocComment(), $name) ?? DocBlock::typeFor($constructorDoc, $name);
+            $parameter = $parameters[$name] ?? null;
+            $optional = $parameter !== null
+                && (($parameter->getType()?->allowsNull() ?? true) || $parameter->isDefaultValueAvailable());
+            $input[] = \sprintf(
+                '%s%s: %s',
+                self::key($name, "{$class}::\${$name}"),
+                $optional ? '?' : '',
+                // A model field crosses as its id.
+                $type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), Model::class)
+                    ? ($type->allowsNull() ? 'string | null' : 'string')
+                    : ($type === null ? 'unknown' : $this->types->mapInputField($type, $hint, $class, $reflection->getNamespaceName())),
+            );
+        }
+
+        return $input;
+    }
+
+    /**
      * One endpoint's line in the EndpointMap -- its path parameters, its
      * form requests' fields as its input, and what it answers with -- and
      * its line in the table the runtime calls it from.
@@ -1227,21 +1286,7 @@ final class TypeScriptGenerator
 
         $input = [];
         foreach ($endpoint->formRequests as $class) {
-            $constructorDoc = new \ReflectionClass($class)->getConstructor()?->getDocComment() ?? false;
-            foreach (DataShape::fieldsOf($class) as $field) {
-                $type = $field->getType();
-                // An array field says what it holds in its docblock, as a
-                // Data field does; read from the same two places.
-                $hint = DocBlock::typeFor($field->getDocComment(), $field->getName()) ?? DocBlock::typeFor($constructorDoc, $field->getName());
-                $input[] = \sprintf(
-                    '%s: %s',
-                    self::key($field->getName(), "{$class}::\${$field->getName()}"),
-                    // A model field crosses as its id.
-                    $type instanceof \ReflectionNamedType && !$type->isBuiltin() && is_subclass_of($type->getName(), Model::class)
-                        ? ($type->allowsNull() ? 'string | null' : 'string')
-                        : ($type === null ? 'unknown' : $this->types->mapInputField($type, $hint, $class, (new \ReflectionClass($class))->getNamespaceName())),
-                );
-            }
+            array_push($input, ...$this->formRequestInput($class));
         }
 
         $data = $endpoint->data;

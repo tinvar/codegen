@@ -218,6 +218,28 @@ namespace Tinvar\Tests\Codegen\Fixtures {
         public function __construct(public string $name, public ?int $priority) {}
     }
 
+    final readonly class TagSite extends FormRequest
+    {
+        /** @param list<string> $tags */
+        public function __construct(public array $tags, public \Tinvar\Tests\Orm\Fixtures\Rack $rack, public string $label = 'new') {}
+    }
+
+    // What else an action takes from the input: its own scalars, a model it
+    // may go without, and a form request's model and list fields.
+    final class SiteToolActions
+    {
+        #[Action, \Tinvar\Attributes\Authorize('update', 'site'), \Tinvar\Attributes\Authorize('view', 'other'), \Tinvar\Attributes\Authorize('view', 'rack')]
+        public function nudge(
+            \Tinvar\Tests\Orm\Fixtures\Site $site,
+            TagSite $request,
+            int $by,
+            ?string $note = null,
+            ?\Tinvar\Tests\Orm\Fixtures\Rack $other = null,
+        ): ActionResult {
+            return ActionResult::ok();
+        }
+    }
+
     final class SiteActions
     {
         #[Action, \Tinvar\Attributes\Authorize('update', 'site')]

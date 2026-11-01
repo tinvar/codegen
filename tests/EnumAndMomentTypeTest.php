@@ -91,7 +91,7 @@ it('types an action\'s enum field as the union of the values the validator takes
 
     $files = (new TypeScriptGenerator())->files([], [], [], $registry->all());
 
-    expect(implode("\n", $files['actions']))->toContain('stage: Stage; note: string | null')->toContain('import type { ActionResult, Stage } from')
+    expect(implode("\n", $files['actions']))->toContain('stage: Stage; note?: string | null')->toContain('import type { ActionResult, Stage } from')
         ->and($files['module'])->toContain("export type Stage = 'placed' | 'shipped';");
 });
 
