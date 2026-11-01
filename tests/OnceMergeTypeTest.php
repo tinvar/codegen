@@ -64,6 +64,24 @@ final readonly class OmPaged extends Data
     public function __construct(public array $data, public int $total) {}
 }
 
+final readonly class OmMaybePaged extends Data
+{
+    /** @param list<OmItem>|null $data */
+    public function __construct(public ?array $data) {}
+}
+
+/** Merged fields that may be null, which the encoder sends as null, unmerged. */
+final readonly class OmMaybe extends Data
+{
+    /** @param list<OmItem>|null $latest */
+    public function __construct(
+        #[Merge(matchOn: 'id')]
+        public ?array $latest,
+        #[Merge(append: 'data', matchOn: 'id')]
+        public ?OmMaybePaged $paged,
+    ) {}
+}
+
 final readonly class OmPlain extends Data
 {
     public function __construct(public string $title) {}
@@ -91,9 +109,19 @@ it('types each field as what the encoder sends for it', function () {
         // Rescue applies to the resolved value, which once wraps.
         ->and($module)->toContain('  risky: OnceField<number | Rescued>;')
         // The object as it is sent, the list under the path its merge field.
-        ->and($module)->toContain("  paged: Omit<OmPaged, 'data'> & { data: MergeField<OmPaged['data'][number]> };")
+        ->and($module)->toContain("  paged: Omit<OmPaged, 'data'> & { data: MergeField<NonNullable<OmPaged['data']>[number]> };")
         // Merged once resolved, so a rescued failure is beside the merge field.
         ->and($module)->toContain('  more: MergeField<OmItem> | Rescued;');
+});
+
+// Review: a #[Merge] field that may be null was refused -- its mapped type
+// ended in `| null`, not `[]` -- and a list under the path that may be null
+// was indexed as `[number]`, which TypeScript refuses on `T[] | null`.
+it('types a merged field that may be null as its merge field or null', function () {
+    $module = new TypeScriptGenerator()->generate([OmMaybe::class]);
+
+    expect($module)->toContain('  latest: MergeField<OmItem> | null;')
+        ->and($module)->toContain("  paged: Omit<OmMaybePaged, 'data'> & { data: MergeField<NonNullable<OmMaybePaged['data']>[number]> } | null;");
 });
 
 it('imports none of the types for a module that needs none', function () {

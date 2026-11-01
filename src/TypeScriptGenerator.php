@@ -473,6 +473,12 @@ final class TypeScriptGenerator
      */
     private function mergedType(?string $path, string $mapped, string $where): string
     {
+        // A field that may be null is sent as null, unmerged: the merge
+        // field, or null.
+        if (str_ends_with($mapped, ' | null')) {
+            return $this->mergedType($path, substr($mapped, 0, -\strlen(' | null')), $where) . ' | null';
+        }
+
         if ($path === null) {
             if (!str_ends_with($mapped, '[]')) {
                 throw new CodegenException("{$where} is #[Merge], so its docblock must say what it is a list of.");
@@ -489,7 +495,7 @@ final class TypeScriptGenerator
         }
         $key = self::key($path, $where);
 
-        return sprintf('Omit<%1$s, %2$s> & { %3$s: MergeField<%1$s[%2$s][number]> }', $mapped, self::literal($path, $where), $key);
+        return sprintf('Omit<%1$s, %2$s> & { %3$s: MergeField<NonNullable<%1$s[%2$s]>[number]> }', $mapped, self::literal($path, $where), $key);
     }
 
     /**
