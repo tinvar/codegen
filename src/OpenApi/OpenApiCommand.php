@@ -17,7 +17,7 @@ use Tinvar\Routing\Domains;
 
 /**
  * `tinvar openapi [--out=FILE] [--check]`: the application's public API as
- * an OpenAPI 3.1 document (ADR 0155), read from what it declares -- every
+ * an OpenAPI 3.1 document (ADR 0158), read from what it declares -- every
  * action, query and endpoint marked #[RequiresScope] -- with nothing run
  * and no database opened.
  *

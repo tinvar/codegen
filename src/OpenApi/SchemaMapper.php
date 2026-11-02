@@ -18,7 +18,7 @@ use Tinvar\Support\Str;
 
 /**
  * PHP types as JSON Schema (2020-12, which OpenAPI 3.1 speaks): what the
- * OpenAPI document says a value is (ADR 0155).
+ * OpenAPI document says a value is (ADR 0158).
  *
  * The rules are codegen's own (TypeMapper), read the same way and refused
  * the same way, so the TypeScript a view is typed with and the schema a
