@@ -27,7 +27,7 @@ use Tinvar\Transfers\TransferRegistry;
  *   queries.json   which query each `@queries` function calls, which the
  *                  renderer build reads for each route's allowlist
  *   entries.json   each entry point's PHP class, method and file, and what
- *                  the views reach it by: what an editor goes to (ADR 0156)
+ *                  the views reach it by: what an editor goes to (ADR 0158)
  *   actions/*.ts   one module of action references per class
  *   testing/       the fakes and mocks component tests run against (ADR 0061)
  *
