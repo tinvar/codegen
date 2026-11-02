@@ -548,7 +548,9 @@ final class TypeScriptGenerator
                         // resolves it. Mapped as a class, the spec's own
                         // RackStats was refused as a model on the boundary.
                         self::isModel($type) => $type->allowsNull() ? 'string | null' : 'string',
-                        default => $this->types->map($type, null, "{$class}::__invoke(\${$parameter->getName()})"),
+                        // A backed enum as the union of its values, which the
+                        // runner coerces into the case, as an action's is.
+                        default => $this->types->mapInputField($type, null, "{$class}::__invoke(\${$parameter->getName()})"),
                     },
                     // What QueryRegistry::parametersFor() lets a caller leave
                     // out: a default, or a type that allows null. Typed as
