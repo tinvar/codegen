@@ -1,4 +1,4 @@
-// The OpenAPI document `tinvar openapi` writes (ADR 0158), held to the
+// The OpenAPI document `tinvar openapi` writes (ADR 0159), held to the
 // OpenAPI 3.1 schema itself, and every Schema Object in it to JSON Schema
 // 2020-12, the dialect OpenAPI 3.1 speaks, each compiled against the whole
 // document so every $ref in it resolves -- with the shop's API as the

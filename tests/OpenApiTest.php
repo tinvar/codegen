@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The OpenAPI document (ADR 0158): what `tinvar openapi` describes of the
+ * The OpenAPI document (ADR 0159): what `tinvar openapi` describes of the
  * actions, queries and endpoints marked #[RequiresScope] -- inputs with
  * their rules as constraints, answers as codegen types them, scopes on the
  * bearer scheme -- and what it refuses to describe. (Its validity against

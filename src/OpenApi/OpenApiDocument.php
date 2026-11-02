@@ -17,7 +17,7 @@ use Tinvar\Routing\Domains;
 use Tinvar\Validation\FieldPlan;
 
 /**
- * An application's public API as an OpenAPI 3.1 document (ADR 0158): every
+ * An application's public API as an OpenAPI 3.1 document (ADR 0159): every
  * action and query marked #[RequiresScope], at `POST /_api/{name}`, and
  * every endpoint marked so, at its own path -- each with what it takes,
  * what it answers, the scopes a token needs for it, and every way it can
