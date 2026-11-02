@@ -67,7 +67,7 @@ final readonly class RouteTypes
      *
      * @param class-string $class
      * @param string $loader the method the route runs: `__invoke`, or an #[AdminResource]'s
-     *        loader for one of its screens (ADR 0150)
+     *        loader for one of its screens (ADR 0152)
      * @return array{list<class-string>, bool}
      */
     private static function returnTypeOf(string $class, string $loader = '__invoke'): array
