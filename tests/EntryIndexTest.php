@@ -141,13 +141,18 @@ it('names each file from the directory the index is written in, wherever that is
         ->and(entry(entries(out: __DIR__), 'query', 'orders.recent')['file'])->toBe('EntryIndexTest.php');
 });
 
-it('writes entries.json beside the types, which --check then finds current', function () {
+it('writes entries.json beside the types, the same through --out, which --check then finds current', function () {
     $out = sys_get_temp_dir() . '/tinvar-entries-' . bin2hex(random_bytes(4));
     $command = new CodegenCommand($out, queries: [RecentOrders::class]);
+    $elsewhere = new CodegenCommand(__DIR__ . '/app/resources/types', queries: [RecentOrders::class]);
 
     ob_start();
     try {
-        expect($command->run([]))->toBe(0)
+        // Written through --out, as `tinvar dev --app=` writes a copy's: each
+        // file still named from the app's own types directory.
+        expect($elsewhere->run(["--out={$out}"]))->toBe(0)
+            ->and(file_get_contents("{$out}/entries.json"))->toBe($elsewhere->files()['entries.json'])
+            ->and($command->run([]))->toBe(0)
             ->and(json_decode((string) file_get_contents("{$out}/entries.json"), true)['entries'][0]['name'] ?? null)->toBe('orders.recent')
             ->and($command->run(['--check']))->toBe(0);
     } finally {

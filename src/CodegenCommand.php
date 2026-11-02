@@ -119,7 +119,7 @@ final readonly class CodegenCommand
             }
         }
 
-        $written = $this->files($out);
+        $written = $this->files();
 
         $stale = array_values(array_filter(
             [...(glob("{$out}/actions/*.ts") ?: []), ...self::generatedUnder("{$out}/testing")],
@@ -178,10 +178,14 @@ final readonly class CodegenCommand
     }
 
     /**
-     * @param string|null $out the directory they are written in, which entries.json names each file from; the constructor's by default
+     * entries.json names each file from the directory the application's
+     * console gives, never from --out: an index written elsewhere -- `tinvar
+     * dev --app=` over a copy of an app -- says the same as the app's own,
+     * so the copy finds it current.
+     *
      * @return array<string, string> path under the output directory => contents
      */
-    public function files(?string $out = null): array
+    public function files(): array
     {
         $routes = new RouteRegistry();
         $routes->registerAll($this->routes);
@@ -212,7 +216,7 @@ final readonly class CodegenCommand
             'generated.ts' => $files['module'],
             'modules.d.ts' => $files['ambient'],
             'queries.json' => $files['queries'],
-            'entries.json' => new EntryIndex($out ?? $this->out, $this->panels)->render($routes->layouts(), $routes->pages(), $this->queries, $actions->all(), $endpoints->all()),
+            'entries.json' => new EntryIndex($this->out, $this->panels)->render($routes->layouts(), $routes->pages(), $this->queries, $actions->all(), $endpoints->all()),
         ];
         foreach ($files['actions'] as $class => $contents) {
             $written["actions/{$class}.ts"] = $contents;
