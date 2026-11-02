@@ -17,7 +17,7 @@ use Tinvar\Support\Str;
 /**
  * `entries.json`: every entry point codegen typed, with the PHP that answers
  * it -- the class, the method, the file -- and what the views reach it by
- * (ADR 0159).
+ * (ADR 0160).
  *
  * The facts an editor needs to go from a component to the PHP behind it and
  * back, and to list the routes, without parsing PHP: a page's view, path,

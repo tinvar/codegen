@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * entries.json (ADR 0159): each entry point codegen types, with the class,
+ * entries.json (ADR 0160): each entry point codegen types, with the class,
  * method and file that answer it, and what a view reaches it by -- what the
  * VS Code extension reads to go between a component and its PHP, and to
  * list the routes, without parsing PHP.
