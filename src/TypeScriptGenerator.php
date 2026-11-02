@@ -68,7 +68,7 @@ final class TypeScriptGenerator
     /** Where the generated `transfer` gets its runtime (ADR 0070). */
     public const TRANSFER_RUNTIME = '@tinvar/react/transfer';
 
-    /** Where the generated `inbox` gets its runtime (ADR 0150). */
+    /** Where the generated `inbox` gets its runtime (ADR 0152). */
     public const INBOX_RUNTIME = '@tinvar/react/inbox';
 
     /** What an identifier written into the output must look like, exactly. */
