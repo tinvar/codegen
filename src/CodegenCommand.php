@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Codegen;
 
 use Tinvar\Actions\ActionRegistry;
+use Tinvar\Auth\PanelRegistry;
 use Tinvar\Channels\ChannelRegistry;
 use Tinvar\Notifications\InboxRegistry;
 use Tinvar\Notifications\NotificationRegistry;
@@ -25,6 +26,8 @@ use Tinvar\Transfers\TransferRegistry;
  *   modules.d.ts   the ambient `@queries/*` modules
  *   queries.json   which query each `@queries` function calls, which the
  *                  renderer build reads for each route's allowlist
+ *   entries.json   each entry point's PHP class, method and file, and what
+ *                  the views reach it by: what an editor goes to (ADR 0156)
  *   actions/*.ts   one module of action references per class
  *   testing/       the fakes and mocks component tests run against (ADR 0061)
  *
@@ -57,6 +60,7 @@ final readonly class CodegenCommand
      * @param list<class-string> $transfers
      * @param list<class-string> $notifications
      * @param list<class-string> $inboxes
+     * @param PanelRegistry|null $panels the application's panels, which entries.json names an entry point's by its namespace from
      */
     public function __construct(
         private string $out,
@@ -71,6 +75,7 @@ final readonly class CodegenCommand
         private array $transfers = [],
         private array $notifications = [],
         private array $inboxes = [],
+        private ?PanelRegistry $panels = null,
     ) {}
 
     /**
@@ -78,7 +83,7 @@ final readonly class CodegenCommand
      * says (ADR 0146): every Data class it has, routable or not, and each
      * entry point and field enum.
      */
-    public static function of(string $out, DiscoveredClasses $classes): self
+    public static function of(string $out, DiscoveredClasses $classes, ?PanelRegistry $panels = null): self
     {
         return new self(
             $out,
@@ -93,6 +98,7 @@ final readonly class CodegenCommand
             transfers: $classes->transfers,
             notifications: $classes->notifications,
             inboxes: $classes->inboxes,
+            panels: $panels,
         );
     }
 
@@ -113,7 +119,7 @@ final readonly class CodegenCommand
             }
         }
 
-        $written = $this->files();
+        $written = $this->files($out);
 
         $stale = array_values(array_filter(
             [...(glob("{$out}/actions/*.ts") ?: []), ...self::generatedUnder("{$out}/testing")],
@@ -171,8 +177,11 @@ final readonly class CodegenCommand
         return 0;
     }
 
-    /** @return array<string, string> path under the output directory => contents */
-    public function files(): array
+    /**
+     * @param string|null $out the directory they are written in, which entries.json names each file from; the constructor's by default
+     * @return array<string, string> path under the output directory => contents
+     */
+    public function files(?string $out = null): array
     {
         $routes = new RouteRegistry();
         $routes->registerAll($this->routes);
@@ -199,7 +208,12 @@ final readonly class CodegenCommand
             inboxes: InboxRegistry::of($this->inboxes)->all(),
         );
 
-        $written = ['generated.ts' => $files['module'], 'modules.d.ts' => $files['ambient'], 'queries.json' => $files['queries']];
+        $written = [
+            'generated.ts' => $files['module'],
+            'modules.d.ts' => $files['ambient'],
+            'queries.json' => $files['queries'],
+            'entries.json' => new EntryIndex($out ?? $this->out, $this->panels)->render($routes->layouts(), $routes->pages(), $this->queries, $actions->all(), $endpoints->all()),
+        ];
         foreach ($files['actions'] as $class => $contents) {
             $written["actions/{$class}.ts"] = $contents;
         }

@@ -628,14 +628,14 @@ final class TypeScriptGenerator
     }
 
     /** `racks.unitLoad` -> `@queries/racks`; a name with no prefix -> `@queries`. */
-    private static function moduleFor(string $wireName): string
+    public static function moduleFor(string $wireName): string
     {
         $dot = strrpos($wireName, '.');
 
         return $dot === false ? '@queries' : '@queries/' . str_replace('.', '/', substr($wireName, 0, $dot));
     }
 
-    private static function functionName(string $wireName): string
+    public static function functionName(string $wireName): string
     {
         $parts = explode('.', $wireName);
         $tail = array_pop($parts);
