@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Tests\Codegen\NotificationType;
 
 /**
- * The #[Notification]s and #[Inbox]es typed for the client (ADR 0154): a
+ * The #[Notification]s and #[Inbox]es typed for the client (ADR 0155): a
  * NotificationMap of each kind's channels, NotificationType, and an
  * `inbox` built on the runtime -- compiled by tsc with useInbox() and
  * <Inbox>, so an inbox there is none of, or a channel a kind does not
