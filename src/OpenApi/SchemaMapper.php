@@ -280,9 +280,15 @@ final class SchemaMapper
         if ($element !== null) {
             $items = $this->mapHint($element['value'], $where);
 
-            return $element['key'] !== null && $element['key'] !== 'number'
-                ? ['type' => 'object', 'additionalProperties' => $items]
-                : ['type' => 'array', 'items' => $items];
+            // An int-keyed array -- or an array-key one -- is sent as a list
+            // when its keys run 0, 1, 2... and as an object of them when
+            // they do not (Encoder), so it is either, as codegen's
+            // Record<number, T> lets it be.
+            return match ($element['key']) {
+                null => ['type' => 'array', 'items' => $items],
+                'number', 'string | number' => ['anyOf' => [['type' => 'array', 'items' => $items], ['type' => 'object', 'additionalProperties' => $items]]],
+                default => ['type' => 'object', 'additionalProperties' => $items],
+            };
         }
 
         $scalar = self::scalar($hint);

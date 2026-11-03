@@ -199,6 +199,24 @@ it('reads a field as codegen and the encoder do: value-of<> as the enum, an enum
         ->and(fn () => new SchemaMapper()->reference(MutableMomentData::class, 'test'))->toThrow(CodegenException::class);
 });
 
+final readonly class ByIdData extends Data
+{
+    /** @param array<int, string> $names */
+    public function __construct(public array $names) {}
+}
+
+it('describes an int-keyed array as the list or the object the encoder may send it as', function () {
+    $mapper = new SchemaMapper();
+    $mapper->reference(ByIdData::class, 'test');
+
+    // A list when its keys run 0, 1, 2...; an object of those keys when
+    // they do not, as codegen's Record<number, string> allows either.
+    expect($mapper->components()['ByIdData']['properties']['names'])->toBe(['anyOf' => [
+        ['type' => 'array', 'items' => ['type' => 'string']],
+        ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+    ]]);
+});
+
 it('writes, checks, and skips an application with no API', function () {
     $file = sys_get_temp_dir() . '/tinvar-openapi-' . bin2hex(random_bytes(4)) . '/openapi.json';
     $command = new OpenApiCommand('Swatches', [SwatchActions::class], [ShowSwatch::class], [SwatchEndpoints::class]);
