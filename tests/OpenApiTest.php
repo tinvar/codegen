@@ -170,6 +170,35 @@ it('refuses a page\'s Scroll, which an API call does not answer with', function 
     expect(fn () => new SchemaMapper()->reference(PagedData::class, 'test'))->toThrow(CodegenException::class, 'an API call does not answer with');
 });
 
+final readonly class ShadedData extends Data
+{
+    /** @param value-of<Shade> $tone */
+    public function __construct(public string $tone) {}
+}
+
+final readonly class ShadeListData extends Data
+{
+    /** @param list<Shade> $shades */
+    public function __construct(public array $shades) {}
+}
+
+final readonly class MutableMomentData extends Data
+{
+    public function __construct(public \DateTime $at) {}
+}
+
+it('reads a field as codegen and the encoder do: value-of<> as the enum, an enum or a moment only as a field declared so', function () {
+    $mapper = new SchemaMapper();
+    $mapper->reference(ShadedData::class, 'test');
+
+    expect($mapper->components()['ShadedData']['properties']['tone'])->toBe(['$ref' => '#/components/schemas/Shade'])
+        // The encoder sends an enum's value only for a field declared as
+        // the enum, and refuses one in a list, as codegen's TypeScript does.
+        ->and(fn () => new SchemaMapper()->reference(ShadeListData::class, 'test'))->toThrow(CodegenException::class)
+        // A mutable moment is never sent: only an immutable one is.
+        ->and(fn () => new SchemaMapper()->reference(MutableMomentData::class, 'test'))->toThrow(CodegenException::class);
+});
+
 it('writes, checks, and skips an application with no API', function () {
     $file = sys_get_temp_dir() . '/tinvar-openapi-' . bin2hex(random_bytes(4)) . '/openapi.json';
     $command = new OpenApiCommand('Swatches', [SwatchActions::class], [ShowSwatch::class], [SwatchEndpoints::class]);

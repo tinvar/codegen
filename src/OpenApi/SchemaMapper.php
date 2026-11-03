@@ -29,7 +29,10 @@ use Tinvar\Support\Str;
  *     #[Optional] one, which is sent only when asked for;
  *   - a backed enum is a component of its values; a CarbonImmutable or
  *     any immutable moment, the ISO 8601 string it crosses as
- *     (`format: date-time`);
+ *     (`format: date-time`) -- each only where a Data field is declared
+ *     as one, which is where the encoder sends it so, and refused
+ *     anywhere else: in a list, a union, an answer of its own;
+ *   - a string field typed `value-of<SomeEnum>` is that enum's values;
  *   - a type that allows null is that or null;
  *   - `list<T>` an array of T, `array<string, T>` an object of T, read from
  *     the docblock as codegen reads it, and refused without one;
@@ -120,8 +123,12 @@ final class SchemaMapper
         }
     }
 
-    /** @return array<string, mixed> */
-    private function mapType(\ReflectionType $type, ?string $hint, string $where): array
+    /**
+     * @param bool $field whether $type is a Data field's own declaration, the
+     *                    one place the encoder sends an enum or a moment
+     * @return array<string, mixed>
+     */
+    private function mapType(\ReflectionType $type, ?string $hint, string $where, bool $field = false): array
     {
         if ($type instanceof \ReflectionUnionType) {
             $parts = array_map(fn (\ReflectionType $t): array => $this->mapType($t, $hint, $where), $type->getTypes());
@@ -137,14 +144,61 @@ final class SchemaMapper
             $name === 'mixed' => ['description' => 'Any value.'],
             $name === 'null' => ['type' => 'null'],
             $name === 'array' => $this->mapArray($hint, $where),
+            $name === 'string' => $this->mapString($hint, $where),
             $type->isBuiltin() => self::scalar($name) ?? throw new CodegenException("Cannot describe '{$name}' at {$where}."),
+            $field => $this->mapField($name, $hint, $where),
             default => $this->mapClass($name, $hint, $where),
         };
 
         return $type->allowsNull() && $name !== 'mixed' && $name !== 'null' ? self::nullable($schema) : $schema;
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * A string, or -- typed `value-of<SomeEnum>`, as TypeMapper reads it --
+     * the values of a string-backed enum.
+     *
+     * @return array<string, mixed>
+     */
+    private function mapString(?string $hint, string $where): array
+    {
+        $hint = $hint === null ? '' : DocBlock::withoutNull($hint);
+        if (preg_match('/^value-of<\s*([\\\\A-Za-z_][\\\\A-Za-z0-9_]*)\s*>$/', $hint, $m) !== 1) {
+            return ['type' => 'string'];
+        }
+        $enum = $this->resolve($m[1], $where);
+        if (!is_subclass_of($enum, \BackedEnum::class) || (string) new \ReflectionEnum($enum)->getBackingType() !== 'string') {
+            throw new CodegenException("{$where} names value-of<{$enum}>, and only a string-backed enum's values are described.");
+        }
+
+        return $this->enum($enum, $where);
+    }
+
+    /**
+     * The class a Data field is declared as: a backed enum or an immutable
+     * moment, which the encoder sends as a scalar there and only there
+     * (Encoder::declared()), or anything mapClass() takes.
+     *
+     * @return array<string, mixed>
+     */
+    private function mapField(string $class, ?string $hint, string $where): array
+    {
+        if (is_subclass_of($class, \BackedEnum::class)) {
+            return $this->enum($class, $where);
+        }
+        if (is_a($class, \DateTimeImmutable::class, true)) {
+            return ['type' => 'string', 'format' => 'date-time'];
+        }
+
+        return $this->mapClass($class, $hint, $where);
+    }
+
+    /**
+     * A class anywhere but a Data field's own declaration: a Data object, a
+     * ProvidesData, a Lazy. An enum or a moment here is refused, as the
+     * encoder refuses it.
+     *
+     * @return array<string, mixed>
+     */
     private function mapClass(string $class, ?string $hint, string $where): array
     {
         if ($class === Scroll::class || $class === CursorScroll::class) {
@@ -156,7 +210,10 @@ final class SchemaMapper
             return $this->mapHint($element, $where);
         }
         if (is_a($class, \DateTimeInterface::class, true)) {
-            return ['type' => 'string', 'format' => 'date-time'];
+            throw new CodegenException(
+                "{$where} is a moment, which is sent only as a Data field declared DateTimeImmutable or CarbonImmutable; "
+                . 'answer with a Data object that holds it.',
+            );
         }
         if (is_subclass_of($class, ProvidesData::class)) {
             try {
@@ -168,8 +225,12 @@ final class SchemaMapper
 
             return $nullable ? self::nullable(self::anyOf($parts)) : self::anyOf($parts);
         }
-        if (enum_exists($class) && !is_subclass_of($class, \BackedEnum::class)) {
-            throw new CodegenException("{$where} is a pure enum, which has no value to send; give {$class} a string or int backing.");
+        if (enum_exists($class)) {
+            throw new CodegenException(
+                is_subclass_of($class, \BackedEnum::class)
+                    ? "{$where} is the enum {$class}, which is sent only as a Data field declared as it; answer with a Data object that holds it."
+                    : "{$where} is a pure enum, which has no value to send; give {$class} a string or int backing.",
+            );
         }
 
         /** @var class-string $class */
@@ -287,7 +348,7 @@ final class SchemaMapper
             $where = "{$class}::\${$field}";
             $type = $property->getType() ?? throw new CodegenException("{$where} has no type; Data fields must be typed.");
             $hint = DocBlock::typeFor($property->getDocComment(), $field) ?? DocBlock::typeFor($constructorDoc, $field);
-            $properties[$field] = $this->type($type, $hint, $where, $property->getDeclaringClass());
+            $properties[$field] = $this->within($property->getDeclaringClass(), fn (): array => $this->mapType($type, $hint, $where, field: true));
             if (!isset($optional[$field])) {
                 $required[] = $field;
             }
