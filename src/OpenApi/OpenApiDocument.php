@@ -145,7 +145,7 @@ final class OpenApiDocument
                     'description' => $operation->kind === Operation::ACTION ? 'Done: what the action answers with.' : 'The query\'s value.',
                     'content' => ['application/json' => ['schema' => $this->answerOf($operation, $where)]],
                 ],
-            ] + self::refusalRefs(),
+            ] + self::refusalRefs($operation->kind === Operation::ACTION),
         ];
         $servers = $this->serversFor($operation->hosts);
         if ($servers !== []) {
@@ -357,17 +357,29 @@ final class OpenApiDocument
         }
     }
 
-    /** @return array<int, array{'$ref': string}> by status */
-    private static function refusalRefs(): array
+    /**
+     * The refusals by status, in order. An action's own 4xx reaches the
+     * client with its status and code (CallResult::REJECTED): 402 for a
+     * plan, 409 for a state, and any other -- `4XX` -- as it answered; its
+     * 422 and 429 share those statuses' entries. A query answers none.
+     *
+     * @return array<int|string, array{'$ref': string}> by status
+     */
+    private static function refusalRefs(bool $action = false): array
     {
-        return [
-            '401' => ['$ref' => '#/components/responses/Unauthenticated'],
-            '403' => ['$ref' => '#/components/responses/Forbidden'],
-            '404' => ['$ref' => '#/components/responses/NotFound'],
-            '422' => ['$ref' => '#/components/responses/ValidationFailed'],
-            '429' => ['$ref' => '#/components/responses/TooManyRequests'],
-            '500' => ['$ref' => '#/components/responses/ServerError'],
-        ];
+        $ref = static fn (string $name): array => ['$ref' => "#/components/responses/{$name}"];
+
+        return array_filter([
+            '401' => $ref('Unauthenticated'),
+            '402' => $action ? $ref('PlanRequired') : null,
+            '403' => $ref('Forbidden'),
+            '404' => $ref('NotFound'),
+            '409' => $action ? $ref('Conflict') : null,
+            '422' => $ref('ValidationFailed'),
+            '429' => $ref('TooManyRequests'),
+            '4XX' => $action ? $ref('Rejected') : null,
+            '500' => $ref('ServerError'),
+        ], static fn (?array $r): bool => $r !== null);
     }
 
     /** @return array<string, array<string, mixed>> */
@@ -380,9 +392,12 @@ final class OpenApiDocument
             'Unauthenticated' => ['description' => 'No API token, or one that does not hold: revoked, expired, ended by a sign-out everywhere, or another host\'s.', 'headers' => $challenge, 'content' => $error],
             'Forbidden' => ['description' => 'The token lacks a scope the call requires (`insufficient_scope`), was presented outside its tenant or panel, or the user may not do this.', 'headers' => $challenge, 'content' => $error],
             'NotFound' => ['description' => 'No such operation here, or a record the call names is not there.', 'content' => $error],
-            'ValidationFailed' => ['description' => 'The input does not validate: each field\'s messages.', 'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ValidationErrors']]]],
+            'PlanRequired' => ['description' => 'The action needs a plan the payer is not on (`plan_required`, from #[RequiresPlan] or #[RequiresFeature]): choose a plan, or update the payment details.', 'content' => $error],
+            'Conflict' => ['description' => 'The action refused for a state it is not in -- `already_subscribed`, say -- with its own code.', 'content' => $error],
+            'Rejected' => ['description' => 'Any other 4xx the action answered itself, with its status and its own code; never its message.', 'content' => $error],
+            'ValidationFailed' => ['description' => 'The input does not validate: each field\'s messages. Or an action\'s own 422, in the error shape with its code.', 'content' => ['application/json' => ['schema' => ['oneOf' => [['$ref' => '#/components/schemas/ValidationErrors'], ['$ref' => '#/components/schemas/Error']]]]]],
             'TooManyRequests' => [
-                'description' => 'A throttle is spent: wait for Retry-After seconds.',
+                'description' => 'A throttle is spent: wait for Retry-After seconds. Or an action\'s own limit, with its code.',
                 'headers' => [
                     'Retry-After' => ['description' => 'Seconds until a call is taken again.', 'schema' => ['type' => 'integer']],
                     'X-RateLimit-Limit' => ['schema' => ['type' => 'integer']],
@@ -403,7 +418,7 @@ final class OpenApiDocument
                 'properties' => ['error' => [
                     'type' => 'object',
                     'properties' => [
-                        'code' => ['type' => 'string', 'description' => 'What kind of refusal: unauthenticated, api_token_invalid, insufficient_scope, forbidden, not_found, too_many_requests, ...'],
+                        'code' => ['type' => 'string', 'description' => 'What kind of refusal: unauthenticated, api_token_invalid, insufficient_scope, forbidden, not_found, too_many_requests, ...; or an action\'s own code with its 4xx -- plan_required, already_subscribed -- `rejected` when it gave none fit to show'],
                         'message' => ['type' => 'string', 'description' => 'The status\'s fixed reason, never the failure\'s own message.'],
                         'digest' => ['type' => 'string', 'description' => 'What the application\'s log has the failure under.'],
                     ],

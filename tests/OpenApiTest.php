@@ -166,6 +166,27 @@ it('names every refusal by the framework\'s shapes', function () {
         ->and($document['components']['schemas']['ValidationErrors']['properties']['errors']['additionalProperties'])->toBe(['type' => 'array', 'items' => ['type' => 'string']]);
 });
 
+// An action's own 4xx reaches the client with its status and code
+// (CallResult::REJECTED): a plan it needs, a state it is not in, a limit
+// of its own, or any other 4xx it answers. A query answers none of them.
+it('names the 4xx an action answers itself, each in the error shape with its code', function () {
+    $document = described();
+    $rename = $document['paths']['/_api/swatches.rename']['post']['responses'];
+    $error = ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Error']]];
+
+    expect(array_keys($rename))->toBe([200, 401, 402, 403, 404, 409, 422, 429, '4XX', 500])
+        ->and($rename[402])->toBe(['$ref' => '#/components/responses/PlanRequired'])
+        ->and($rename[409])->toBe(['$ref' => '#/components/responses/Conflict'])
+        ->and($rename['4XX'])->toBe(['$ref' => '#/components/responses/Rejected'])
+        ->and($document['components']['responses']['PlanRequired']['content'])->toBe($error)
+        ->and($document['components']['responses']['Conflict']['content'])->toBe($error)
+        ->and($document['components']['responses']['Rejected']['content'])->toBe($error)
+        ->and($document['components']['responses']['ValidationFailed']['content']['application/json']['schema'])
+        ->toBe(['oneOf' => [['$ref' => '#/components/schemas/ValidationErrors'], ['$ref' => '#/components/schemas/Error']]])
+        ->and($document['components']['schemas']['Error']['properties']['error']['properties']['code']['description'])->toContain('plan_required')
+        ->and(array_keys($document['paths']['/_api/swatches.show']['post']['responses']))->toBe([200, 401, 403, 404, 422, 429, 500]);
+});
+
 it('refuses a page\'s Scroll, which an API call does not answer with', function () {
     expect(fn () => new SchemaMapper()->reference(PagedData::class, 'test'))->toThrow(CodegenException::class, 'an API call does not answer with');
 });
