@@ -31,7 +31,7 @@ use Tinvar\Transfers\TransferRegistry;
  *   actions/*.ts   one module of action references per class
  *   testing/       the fakes and mocks component tests run against (ADR 0061)
  *
- * Only a file that changed is written: `tinvar dev` runs this on every
+ * Only a file that changed is written: `tinvar serve --dev` runs this on every
  * save, and a file rewritten as it was is one Vite reloads for nothing.
  * What was generated before and is not now -- a class with no actions
  * left, a query module gone and its mock -- is removed; under testing/,

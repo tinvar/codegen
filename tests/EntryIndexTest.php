@@ -148,7 +148,7 @@ it('writes entries.json beside the types, the same through --out, which --check 
 
     ob_start();
     try {
-        // Written through --out, as `tinvar dev --app=` writes a copy's: each
+        // Written through --out, as `tinvar serve --dev --app=` writes a copy's: each
         // file still named from the app's own types directory.
         expect($elsewhere->run(["--out={$out}"]))->toBe(0)
             ->and(file_get_contents("{$out}/entries.json"))->toBe($elsewhere->files()['entries.json'])
