@@ -6,6 +6,7 @@ namespace Tinvar\Codegen\OpenApi;
 
 use Tinvar\Actions\ActionRegistry;
 use Tinvar\Api\ApiCalls;
+use Tinvar\Attributes\AcceptsTenantTokens;
 use Tinvar\Attributes\RequiresScope;
 use Tinvar\Auth\PanelRegistry;
 use Tinvar\Calls\Operations;
@@ -59,7 +60,7 @@ final readonly class OpenApiCommand
 
     public function document(): OpenApiDocument
     {
-        [$operations, $endpoints] = $this->declared();
+        [$operations, $endpoints, $tenantTokens] = $this->declared();
 
         return new OpenApiDocument(
             array_map(static fn (array $entry): array => [$entry[0], $entry[1]->scopes], $operations),
@@ -67,6 +68,7 @@ final readonly class OpenApiCommand
             $this->title,
             $this->version,
             $this->domains,
+            $tenantTokens,
         );
     }
 
@@ -125,7 +127,12 @@ final readonly class OpenApiCommand
         return 0;
     }
 
-    /** @return array{list<array{\Tinvar\Calls\Operation, RequiresScope}>, list<CompiledEndpoint>} */
+    /**
+     * What the application exposes: its operations, its endpoints, and the
+     * names of the operations that accept tenant tokens (ADR 0193).
+     *
+     * @return array{list<array{\Tinvar\Calls\Operation, RequiresScope}>, list<CompiledEndpoint>, list<string>}
+     */
     private function declared(): array
     {
         $actions = new ActionRegistry();
@@ -136,10 +143,12 @@ final readonly class OpenApiCommand
         $endpoints->registerAll($this->endpoints);
 
         ApiCalls::refuseOnActionHolders($actions);
+        $operations = Operations::described(RequiresScope::class, $actions, $queries, $this->panels);
 
         return [
-            Operations::described(RequiresScope::class, $actions, $queries, $this->panels),
+            $operations,
             array_values(array_filter($endpoints->all(), static fn (CompiledEndpoint $e): bool => $e->takesApiTokens())),
+            ApiCalls::acceptingTenantTokens(Operations::described(AcceptsTenantTokens::class, $actions, $queries, $this->panels), $operations, $actions),
         ];
     }
 }

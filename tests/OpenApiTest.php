@@ -14,6 +14,7 @@ namespace Tinvar\Tests\Codegen\OpenApi;
 
 use Carbon\CarbonImmutable;
 use Tinvar\Actions\ActionResult;
+use Tinvar\Attributes\AcceptsTenantTokens;
 use Tinvar\Attributes\Action;
 use Tinvar\Attributes\Authorize;
 use Tinvar\Attributes\Get;
@@ -284,3 +285,52 @@ it('describes an endpoint reading its body\'s bytes (ADR 0183) by its form reque
         ->and(array_keys($rename['requestBody']['content']))->toBe(['application/json'])
         ->and(array_keys($rename['requestBody']['content']['application/json']['schema']['properties']))->not->toContain('body');
 });
+
+#[Query(name: 'swatches.recent'), Authorize('viewAny', SwatchData::class), RequiresScope('swatches:read'), AcceptsTenantTokens]
+final class RecentSwatches
+{
+    /** The swatches made lately, for an organization's integration. */
+    public function __invoke(): SwatchData
+    {
+        throw new \LogicException('described, never run');
+    }
+}
+
+final class OrganizationSwatchEndpoints
+{
+    /** A swatch's label, for the organization's printer. */
+    #[Get('/api/org/swatches/{id}/label', name: 'swatches.orgLabel'), Authorize('view', SwatchData::class), RequiresScope('swatches:read'), AcceptsTenantTokens]
+    public function label(string $id): SwatchData
+    {
+        throw new \LogicException('described, never run');
+    }
+}
+
+it('marks what accepts tenant tokens (ADR 0193): a second scheme beside the user\'s, and x-tenant-tokens', function () {
+    $document = new OpenApiCommand('Swatches', [SwatchActions::class], [ShowSwatch::class, RecentSwatches::class], [SwatchEndpoints::class, OrganizationSwatchEndpoints::class])->document()->toArray();
+    $paths = $document['paths'];
+
+    expect($paths['/_api/swatches.recent']['post']['security'])->toBe([['apiToken' => ['swatches:read']], ['tenantToken' => ['swatches:read']]])
+        ->and($paths['/_api/swatches.recent']['post']['x-tenant-tokens'])->toBeTrue()
+        ->and($paths['/api/org/swatches/{id}/label']['get']['security'])->toBe([['apiToken' => ['swatches:read']], ['tenantToken' => ['swatches:read']]])
+        ->and($paths['/api/org/swatches/{id}/label']['get']['x-tenant-tokens'])->toBeTrue()
+        ->and($paths['/_api/swatches.show']['post']['security'])->toBe([['apiToken' => ['swatches:read']]])
+        ->and($paths['/_api/swatches.show']['post'])->not->toHaveKey('x-tenant-tokens')
+        ->and($paths['/api/swatches/{id}/label']['get'])->not->toHaveKey('x-tenant-tokens')
+        ->and($document['components']['securitySchemes']['tenantToken'])->toMatchArray(['type' => 'http', 'scheme' => 'bearer', 'bearerFormat' => 'tvt_<id>_<secret>'])
+        ->and($document['components']['securitySchemes']['tenantToken']['description'])->toContain('swatches:read')
+        ->and(described()['components']['securitySchemes'])->not->toHaveKey('tenantToken');
+});
+
+it('refuses #[AcceptsTenantTokens] on what requires no scope', function () {
+    expect(fn () => new OpenApiCommand('Swatches', [UnscopedSwatchActions::class])->document())->toThrow(\LogicException::class, 'requires no scope');
+});
+
+final class UnscopedSwatchActions
+{
+    #[Action(name: 'swatches.unscoped'), Authorize('update', SwatchData::class), AcceptsTenantTokens]
+    public function unscoped(): ActionResult
+    {
+        return ActionResult::ok();
+    }
+}

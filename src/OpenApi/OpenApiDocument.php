@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Codegen\OpenApi;
 
 use Tinvar\Api\ApiEndpoint;
+use Tinvar\Api\ApiTokenKind;
 use Tinvar\Api\ApiTokenSecret;
 use Tinvar\Calls\InputSchema;
 use Tinvar\Calls\Operation;
@@ -49,9 +50,14 @@ final class OpenApiDocument
 
     private SchemaMapper $schemas;
 
+    /** @var array<string, true> the operations that accept tenant tokens, by name */
+    private array $tenantTokens;
+
     /**
      * @param list<array{Operation, list<string>}> $operations each, and the scopes it requires
      * @param list<CompiledEndpoint> $endpoints those that take API tokens
+     * @param list<string> $tenantTokenOperations the operations that accept tenant tokens, by name
+     *        (ADR 0193); an endpoint says so itself
      */
     public function __construct(
         private array $operations,
@@ -59,8 +65,10 @@ final class OpenApiDocument
         private string $title,
         private string $version = '1.0.0',
         private ?Domains $domains = null,
+        array $tenantTokenOperations = [],
     ) {
         $this->schemas = new SchemaMapper();
+        $this->tenantTokens = array_fill_keys($tenantTokenOperations, true);
     }
 
     /** @return array<string, mixed> */
@@ -69,21 +77,30 @@ final class OpenApiDocument
         $this->schemas = new SchemaMapper();
         $paths = [];
         $scopes = [];
+        $tenantScopes = [];
 
         foreach ($this->operations as [$operation, $required]) {
             $path = ApiEndpoint::PREFIX . $operation->name;
             $paths[$path] = ['post' => $this->operation($operation, $required)];
             array_push($scopes, ...$required);
+            if (isset($this->tenantTokens[$operation->name])) {
+                array_push($tenantScopes, ...$required);
+            }
         }
         foreach ($this->endpoints as $endpoint) {
             foreach ($endpoint->methods as $method) {
                 $paths[$endpoint->template][strtolower($method)] = $this->endpoint($endpoint, $method);
             }
             array_push($scopes, ...$endpoint->scopes);
+            if ($endpoint->tenantTokens) {
+                array_push($tenantScopes, ...$endpoint->scopes);
+            }
         }
         ksort($paths);
         $scopes = array_values(array_unique($scopes));
         sort($scopes);
+        $tenantScopes = array_values(array_unique($tenantScopes));
+        sort($tenantScopes);
 
         $document = [
             'openapi' => self::VERSION,
@@ -105,6 +122,15 @@ final class OpenApiDocument
                         'description' => 'An API token its user issued. Scopes: ' . ($scopes === [] ? 'none.' : implode(', ', $scopes) . '.')
                             . ' A token matches `' . ApiTokenSecret::SCANNER_PATTERN . '`, which secret scanners may look for.',
                     ],
+                    // An organization's token (ADR 0193), where anything takes one.
+                    ...($tenantScopes === [] ? [] : ['tenantToken' => [
+                        'type' => 'http',
+                        'scheme' => 'bearer',
+                        'bearerFormat' => ApiTokenKind::Tenant->value . '<id>_<secret>',
+                        'description' => 'An API token an organization owns, made by one of its members, acting as itself and never as a user; '
+                            . 'taken only where an operation is marked `x-tenant-tokens`. Scopes: ' . implode(', ', $tenantScopes) . '.'
+                            . ' A token matches `' . ApiTokenKind::Tenant->scannerPattern() . '`, which secret scanners may look for.',
+                    ]]),
                 ],
                 'responses' => self::refusals(),
                 'schemas' => [...$this->schemas->components(), ...self::errorSchemas()],
@@ -133,7 +159,7 @@ final class OpenApiDocument
             'operationId' => $operation->name,
             'tags' => [explode('.', $operation->name)[0]],
             'summary' => $this->summary($operation) ?? $operation->name,
-            'security' => [['apiToken' => $scopes]],
+            'security' => self::security($scopes, isset($this->tenantTokens[$operation->name])),
             'requestBody' => [
                 'required' => $input['required'] !== [],
                 'content' => ['application/json' => ['schema' => $input]],
@@ -147,12 +173,27 @@ final class OpenApiDocument
                 ],
             ] + self::refusalRefs($operation->kind === Operation::ACTION),
         ];
+        if (isset($this->tenantTokens[$operation->name])) {
+            $described['x-tenant-tokens'] = true;
+        }
         $servers = $this->serversFor($operation->hosts);
         if ($servers !== []) {
             $described['servers'] = $servers;
         }
 
         return $described;
+    }
+
+    /**
+     * Who may call it: a user's token holding $scopes, or -- where it
+     * accepts them (ADR 0193) -- an organization's, either one alone.
+     *
+     * @param list<string> $scopes
+     * @return list<array<string, list<string>>>
+     */
+    private static function security(array $scopes, bool $tenantTokens): array
+    {
+        return $tenantTokens ? [['apiToken' => $scopes], ['tenantToken' => $scopes]] : [['apiToken' => $scopes]];
     }
 
     /** @return array<string, mixed> */
@@ -184,8 +225,11 @@ final class OpenApiDocument
             'tags' => [explode('.', $endpoint->name)[0]],
             'summary' => self::docSummary(new \ReflectionMethod($endpoint->class, $endpoint->method))
                 ?? self::docSummary(new \ReflectionClass($endpoint->class)) ?? $endpoint->name,
-            'security' => [['apiToken' => $endpoint->scopes]],
+            'security' => self::security($endpoint->scopes, $endpoint->tenantTokens),
         ];
+        if ($endpoint->tenantTokens) {
+            $described['x-tenant-tokens'] = true;
+        }
         if (\in_array($method, ['GET', 'DELETE'], true)) {
             foreach ($fields as $name => $field) {
                 $parameters[] = ['name' => $name, 'in' => 'query', 'required' => !$field->nullable && !$field->hasDefault, 'schema' => InputSchema::field($field)];
