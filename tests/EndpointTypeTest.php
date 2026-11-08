@@ -82,6 +82,21 @@ it('describes each endpoint by name, its model fields as ids', function () {
         ->toContain("  'racks.move': { methods: ['PUT', 'PATCH'], segments: ['racks', '{rack}', 'site'], returns: 'data' },\n");
 });
 
+final class SignedRackEndpoints
+{
+    #[\Tinvar\Attributes\Post('/racks/{rack}/telemetry', name: 'racks.telemetry'), \Tinvar\Attributes\Authorize('update', 'rack')]
+    public function telemetry(\Tinvar\Tests\Orm\Fixtures\Rack $rack, \Tinvar\Tests\Codegen\Fixtures\Endpoints\ResizeRackRequest $request, \Tinvar\Http\RawBody $body): void {}
+}
+
+it('types an endpoint reading its body\'s bytes by its path and form request alone (ADR 0183)', function () {
+    $registry = new EndpointRegistry();
+    $registry->register(SignedRackEndpoints::class);
+
+    expect((new TypeScriptGenerator())->files([], endpoints: $registry->all())['module'])
+        ->toContain("  'racks.telemetry': { params: { rack: string }; input: { heightU: number; note?: string | null }; returns: undefined };\n")
+        ->not->toContain('RawBody');
+});
+
 it('emits nothing for an application with no endpoints', function () {
     expect((new TypeScriptGenerator())->files([])['module'])->not->toContain('endpoint');
 });

@@ -17,6 +17,7 @@ use Tinvar\Actions\ActionResult;
 use Tinvar\Attributes\Action;
 use Tinvar\Attributes\Authorize;
 use Tinvar\Attributes\Get;
+use Tinvar\Attributes\Post;
 use Tinvar\Attributes\Query;
 use Tinvar\Attributes\RequiresScope;
 use Tinvar\Codegen\CodegenException;
@@ -24,6 +25,7 @@ use Tinvar\Codegen\OpenApi\OpenApiCommand;
 use Tinvar\Codegen\OpenApi\SchemaMapper;
 use Tinvar\Data\Data;
 use Tinvar\Data\Scroll;
+use Tinvar\Http\RawBody;
 use Tinvar\Support\Lazy;
 use Tinvar\Validation\FormRequest;
 use Tinvar\Validation\Rules\Email;
@@ -257,4 +259,28 @@ it('writes, checks, and skips an application with no API', function () {
         @unlink($file);
         @rmdir(\dirname($file));
     }
+});
+
+final class SignedSwatchEndpoints
+{
+    /** A swatch's colour profile, signed by the press that sends it. */
+    #[Post('/api/swatches/{id}/profile', name: 'swatches.profile'), Authorize('update', SwatchData::class), RequiresScope('swatches:write')]
+    public function profile(string $id, RawBody $body): void {}
+
+    /** A rename the press signs, its fields read as JSON beside the bytes. */
+    #[Post('/api/swatches/{id}/rename', name: 'swatches.signedRename'), Authorize('update', SwatchData::class), RequiresScope('swatches:write')]
+    public function rename(string $id, RenameRequest $request, RawBody $body): void {}
+}
+
+it('describes an endpoint reading its body\'s bytes (ADR 0183) by its form requests, or as any body without one', function () {
+    $paths = new OpenApiCommand('Swatches', endpoints: [SignedSwatchEndpoints::class])->document()->toArray()['paths'];
+
+    $profile = $paths['/api/swatches/{id}/profile']['post'];
+    $rename = $paths['/api/swatches/{id}/rename']['post'];
+
+    expect(array_keys($profile['requestBody']['content']))->toBe(['*/*'])
+        ->and($profile['requestBody']['required'])->toBeFalse()
+        ->and(array_column($profile['parameters'], 'name'))->toBe(['id'])
+        ->and(array_keys($rename['requestBody']['content']))->toBe(['application/json'])
+        ->and(array_keys($rename['requestBody']['content']['application/json']['schema']['properties']))->not->toContain('body');
 });

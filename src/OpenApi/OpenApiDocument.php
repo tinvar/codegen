@@ -200,6 +200,12 @@ final class OpenApiDocument
                     'required' => array_map(strval(...), $required),
                 ]]],
             ];
+        } elseif ($endpoint->rawBody !== null) {
+            // It reads the body as bytes (ADR 0183), of any type it is sent.
+            $described['requestBody'] = [
+                'required' => false,
+                'content' => ['*/*' => ['schema' => ['description' => 'The body, read as the bytes it arrives as.']]],
+            ];
         }
         if ($parameters !== []) {
             $described['parameters'] = $parameters;
