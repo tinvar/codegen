@@ -34,9 +34,9 @@ use Tinvar\Transfers\TransferRegistry;
  * Only a file that changed is written: `tinvar serve --dev` runs this on every
  * save, and a file rewritten as it was is one Vite reloads for nothing.
  * What was generated before and is not now -- a class with no actions
- * left, a query module gone and its mock -- is removed; under testing/,
- * only a file codegen wrote, so a helper a developer put beside the mocks
- * is left, and named.
+ * left, a query module gone and its mock -- is removed, but only a file
+ * codegen wrote (ADR 0222): a module or helper a developer put beside them
+ * is left, and named. A file it could not write or remove fails the run.
  *
  * With --check it writes nothing, and fails -- naming each file -- when
  * what is on disk is not what the PHP generates now: the drift guard CI
@@ -109,7 +109,14 @@ final readonly class CodegenCommand
         $check = false;
         foreach ($arguments as $argument) {
             if (str_starts_with($argument, '--out=')) {
-                $out = rtrim(substr($argument, 6), '/');
+                $out = rtrim(substr($argument, 6), '/\\');
+                // Nothing, or a root -- `/`, `C:\` -- is no directory of the
+                // application's to write into or remove from.
+                if ($out === '' || preg_match('/^[A-Za-z]:$/', $out) === 1) {
+                    fwrite(STDERR, "--out needs a directory, not '" . substr($argument, 6) . "'. Usage: tinvar codegen [--out=DIR] [--check]\n");
+
+                    return 64;
+                }
             } elseif ($argument === '--check') {
                 $check = true;
             } else {
@@ -121,15 +128,12 @@ final readonly class CodegenCommand
 
         $written = $this->files();
 
-        $stale = array_values(array_filter(
+        ['remove' => $stale, 'leave' => $handWritten] = self::stale(
+            $out,
             [...(glob("{$out}/actions/*.ts") ?: []), ...self::generatedUnder("{$out}/testing")],
-            static fn (string $file): bool => !isset($written[substr($file, \strlen($out) + 1)]),
-        ));
-        $handWritten = array_values(array_filter(
-            $stale,
-            static fn (string $file): bool => str_starts_with($file, "{$out}/testing/") && !self::writtenByCodegen($file),
-        ));
-        $stale = array_values(array_diff($stale, $handWritten));
+            $written,
+            self::writtenByCodegen(...),
+        );
         foreach ($handWritten as $file) {
             fprintf(STDERR, "left %s: tinvar codegen did not write it\n", $file);
         }
@@ -143,7 +147,7 @@ final readonly class CodegenCommand
                 }
             }
             foreach ($stale as $file) {
-                $drift[] = substr($file, \strlen($out) + 1) . ' is generated from nothing now';
+                $drift[] = self::relative($out, $file) . ' is generated from nothing now';
             }
             if ($drift === []) {
                 echo "The generated TypeScript matches the PHP signatures.\n";
@@ -157,24 +161,95 @@ final readonly class CodegenCommand
 
         // A class that no longer has actions leaves no module behind: an
         // import of it should fail the build, not resolve to references the
-        // server no longer answers.
+        // server no longer answers. A file that could not be removed or
+        // written fails the run: what the views import is not what the PHP
+        // says, and dev mode and CI must not read it as done.
+        $failed = false;
         foreach ($stale as $file) {
-            unlink($file);
+            if (!self::quietly(static fn (): bool => unlink($file))) {
+                fprintf(STDERR, "could not remove %s\n", $file);
+                $failed = true;
+
+                continue;
+            }
             printf("removed %s\n", $file);
         }
         foreach ($written as $name => $contents) {
             $path = "{$out}/{$name}";
-            if (!is_dir(\dirname($path))) {
-                mkdir(\dirname($path), 0o755, true);
+            $directory = \dirname($path);
+            if (!is_dir($directory) && !self::quietly(static fn (): bool => mkdir($directory, 0o755, true)) && !is_dir($directory)) {
+                fprintf(STDERR, "could not write %s: could not make %s\n", $path, $directory);
+                $failed = true;
+
+                continue;
             }
             $existed = is_file($path) ? file_get_contents($path) : null;
-            if ($existed !== $contents) {
-                file_put_contents($path, $contents);
+            if ($existed !== $contents && !self::quietly(static fn (): bool => file_put_contents($path, $contents) === \strlen($contents))) {
+                fprintf(STDERR, "could not write %s\n", $path);
+                $failed = true;
+
+                continue;
             }
             printf("%s %s (%d bytes)\n", $existed === $contents ? 'unchanged' : 'wrote', realpath($path) ?: $path, \strlen($contents));
         }
 
-        return 0;
+        return $failed ? 1 : 0;
+    }
+
+    /**
+     * What on disk the PHP no longer generates, sorted into what codegen
+     * removes -- a file it wrote -- and what it leaves, and names: a file a
+     * developer put there, under actions/ or testing/ alike (ADR 0222). A
+     * file is matched by its path under $out with forward slashes, so a
+     * Windows path, which the directory iterator joins with backslashes,
+     * is matched as one.
+     *
+     * @param list<string> $found the files under actions/ and testing/
+     * @param array<string, string> $written path under $out => contents
+     * @param callable(string): bool $ours whether codegen wrote a file
+     * @return array{remove: list<string>, leave: list<string>}
+     */
+    public static function stale(string $out, array $found, array $written, callable $ours): array
+    {
+        $remove = [];
+        $leave = [];
+        foreach ($found as $file) {
+            if (isset($written[self::relative($out, $file)])) {
+                continue;
+            }
+            if ($ours($file)) {
+                $remove[] = $file;
+            } else {
+                $leave[] = $file;
+            }
+        }
+
+        return ['remove' => $remove, 'leave' => $leave];
+    }
+
+    /**
+     * A filesystem call whose failure the run reports itself, so PHP's own
+     * warning is not printed as well.
+     *
+     * @param \Closure(): bool $call
+     */
+    private static function quietly(\Closure $call): bool
+    {
+        set_error_handler(static fn (): bool => true);
+        try {
+            return $call();
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    /** A file's path under $out, with forward slashes whichever separator either uses. */
+    public static function relative(string $out, string $file): string
+    {
+        $out = rtrim(str_replace('\\', '/', $out), '/');
+        $file = str_replace('\\', '/', $file);
+
+        return str_starts_with($file, "{$out}/") ? substr($file, \strlen($out) + 1) : $file;
     }
 
     /**
